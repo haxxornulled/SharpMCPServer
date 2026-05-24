@@ -1,5 +1,10 @@
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
+using MCPServer.AgentRouter.Application;
+using MCPServer.AgentRouter.Defaults;
+using MCPServer.AgentRouter.Hosting;
+using MCPServer.AgentRouter.Infrastructure;
+using MCPServer.AgentRouter.Ssh;
 using MCPServer.Application;
 using MCPServer.Infrastructure;
 using MCPServer.Tools.Ssh;
@@ -36,6 +41,10 @@ try
         .ConfigureContainer<ContainerBuilder>((hostContext, containerBuilder) =>
         {
             containerBuilder.RegisterModule(new ApplicationModule());
+            containerBuilder.RegisterModule(new AgentRouterApplicationModule());
+            containerBuilder.RegisterModule(new AgentRouterInfrastructureModule());
+            containerBuilder.RegisterModule(new AgentRouterDefaultsModule());
+            containerBuilder.RegisterModule(new AgentRouterHostingModule());
             containerBuilder.RegisterModule(new InfrastructureModule());
 
             var initialSshSettings = SshToolSettings.FromConfiguration(
@@ -51,6 +60,7 @@ try
             // so appsettings changes made by a future VS extension can enable/disable SSH execution,
             // adjust allowlists, trace paths, and profile paths without restarting this MCP server.
             containerBuilder.RegisterModule(new SshToolsModule());
+            containerBuilder.RegisterModule(new AgentRouterSshModule());
         });
 
     using var host = builder.Build();

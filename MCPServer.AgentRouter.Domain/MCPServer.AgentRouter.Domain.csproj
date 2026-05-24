@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>MCPServer.AgentRouter.Domain</PackageId>
+    <Title>MCPServer AgentRouter Domain</Title>
+    <Description>Pure domain model for the MCPServer AgentRouter bounded context.</Description>
+  </PropertyGroup>
+</Project>

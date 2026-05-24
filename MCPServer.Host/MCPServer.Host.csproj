@@ -14,6 +14,11 @@
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.8" />
     <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Defaults\MCPServer.AgentRouter.Defaults.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Application\MCPServer.AgentRouter.Application.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Infrastructure\MCPServer.AgentRouter.Infrastructure.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Hosting\MCPServer.AgentRouter.Hosting.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Ssh\MCPServer.AgentRouter.Ssh.csproj" />
     <ProjectReference Include="..\MCPServer.Application\MCPServer.Application.csproj" />
     <ProjectReference Include="..\MCPServer.Infrastructure\MCPServer.Infrastructure.csproj" />
     <ProjectReference Include="..\MCPServer.Tools.Ssh\MCPServer.Tools.Ssh.csproj" />

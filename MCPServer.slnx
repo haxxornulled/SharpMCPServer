@@ -1,5 +1,18 @@
 <Solution>
   <Project Path="MCPServer.Host/MCPServer.Host.csproj" />
+  <Project Path="MCPServer.AgentRouter.Abstractions/MCPServer.AgentRouter.Abstractions.csproj" />
+  <Project Path="MCPServer.AgentRouter.Domain/MCPServer.AgentRouter.Domain.csproj" />
+  <Project Path="MCPServer.AgentRouter.Domain.Tests/MCPServer.AgentRouter.Domain.Tests.csproj" />
+  <Project Path="MCPServer.AgentRouter.Application/MCPServer.AgentRouter.Application.csproj" />
+  <Project Path="MCPServer.AgentRouter.Application.Tests/MCPServer.AgentRouter.Application.Tests.csproj" />
+  <Project Path="MCPServer.AgentRouter.Infrastructure/MCPServer.AgentRouter.Infrastructure.csproj" />
+  <Project Path="MCPServer.AgentRouter.Infrastructure.Tests/MCPServer.AgentRouter.Infrastructure.Tests.csproj" />
+  <Project Path="MCPServer.AgentRouter.Hosting/MCPServer.AgentRouter.Hosting.csproj" />
+  <Project Path="MCPServer.AgentRouter.Hosting.Tests/MCPServer.AgentRouter.Hosting.Tests.csproj" />
+  <Project Path="MCPServer.AgentRouter.Ssh/MCPServer.AgentRouter.Ssh.csproj" />
+  <Project Path="MCPServer.AgentRouter.Ssh.Tests/MCPServer.AgentRouter.Ssh.Tests.csproj" />
+  <Project Path="MCPServer.AgentRouter.Defaults/MCPServer.AgentRouter.Defaults.csproj" />
+  <Project Path="MCPServer.AgentRouter.Defaults.Tests/MCPServer.AgentRouter.Defaults.Tests.csproj" />
   <Project Path="MCPServer.Application/MCPServer.Application.csproj" />
   <Project Path="MCPServer.Domain/MCPServer.Domain.csproj" />
   <Project Path="MCPServer.Infrastructure/MCPServer.Infrastructure.csproj" />
