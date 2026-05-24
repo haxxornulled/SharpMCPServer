@@ -1,0 +1,43 @@
+@"
+# Build output
+bin/
+obj/
+[Bb]uild/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+*.tmp
+*.log
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# NuGet
+*.nupkg
+packages/
+.nuget/
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+
+# Local MCP runtime/operator data
+ssh-profiles.local.json
+vault.json
+vault.key
+*.local.json
+
+# Do not commit generated SSH/runtime traces
+traces/
+ssh-traces/
+"@ | Set-Content -Path .\.gitignore -Encoding UTF8
