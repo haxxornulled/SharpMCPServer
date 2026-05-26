@@ -23,7 +23,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.14
+          python-version: '3.14'
 
       - name: Restore
         shell: pwsh
@@ -49,26 +49,7 @@ jobs:
 
       - name: Python wheel smoke test
         shell: pwsh
-        run: |
-          $smokeDir = Join-Path $env:RUNNER_TEMP 'mcpserver-wheel-smoke'
-          New-Item -ItemType Directory -Force -Path $smokeDir | Out-Null
-          Push-Location $smokeDir
-          try {
-            Remove-Item Env:MCP_SERVER_AGENTROUTER_NATIVE_LIBRARY -ErrorAction SilentlyContinue
-            @'
-from mcpserver_agentrouter_bridge import AgentRouterBridge
-with AgentRouterBridge() as bridge:
-    response = bridge.run({
-        "objective": "review the workspace",
-        "metadata": {"agent.workflowMode": "deterministic"},
-    })
-print(response["status"])
-print(response["message"])
-'@ | python -
-          }
-          finally {
-            Pop-Location
-          }
+        run: .\scripts\Smoke-PythonWheel.ps1
 
       - name: Python tests
         shell: pwsh
