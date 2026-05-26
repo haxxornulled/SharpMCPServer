@@ -18,7 +18,7 @@ Protocol baseline: MCP 2025-11-25. The current implementation matrix lives in [d
 
 ## Architecture at a glance
 
-Solid arrows point from the owning project or boundary to the dependency it uses. The host-side cluster explicitly includes the shared `MCPServer.Domain` model consumed by `MCPServer.Application`.
+Solid arrows point from the owning project or boundary to the dependency it uses. The host-side cluster is drawn as a stack so `MCPServer.Domain` stays visible; the host also directly composes `MCPServer.Application`.
 
 ```mermaid
 flowchart LR
@@ -31,13 +31,25 @@ flowchart LR
     end
 
     subgraph HostSide["Host side"]
+        direction TB
         MainHost["MCPServer.Host"]
-        Sidecar["MCPServer.Host.Sidecar"]
         Infra["MCPServer.Infrastructure"]
         App["MCPServer.Application"]
         Domain["MCPServer.Domain\n(host-side shared domain)"]
+
+        MainHost --> Infra
+        Infra --> App
+        App --> Domain
+        MainHost -.-> App
+    end
+
+    subgraph SshBoundary["SSH boundary"]
+        Sidecar["MCPServer.Host.Sidecar"]
         Ssh["MCPServer.Ssh"]
         SshTools["MCPServer.Tools.Ssh"]
+
+        Sidecar --> Ssh
+        SshTools --> Ssh
     end
 
     subgraph RouterCore["AgentRouter core"]
@@ -54,13 +66,6 @@ flowchart LR
 
     Python --> Native
     Native --> ARApp
-
-    MainHost --> Infra
-    MainHost --> App
-    Sidecar --> Ssh
-    Infra --> App
-    App --> Domain
-    SshTools --> Ssh
 
     ARHost --> ARInfra --> ARApp --> ARDom --> ARAbs
 ```
