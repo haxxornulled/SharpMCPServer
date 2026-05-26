@@ -1,6 +1,7 @@
 using Autofac;
 using MCPServer.Application.Mcp.JsonRpc.Interfaces;
 using MCPServer.Application.Mcp.Interfaces;
+using MCPServer.Application.Mcp;
 using MCPServer.Infrastructure.Mcp.Http.Authorization;
 using MCPServer.Infrastructure.Mcp.Http;
 using MCPServer.Infrastructure.Mcp.JsonRpc;
@@ -36,7 +37,7 @@ public sealed class InfrastructureModule : Module
             .As<IMcpClientFeatureInvoker>()
             .As<IMcpTaskStatusNotifier>()
             .As<IStdioMcpClientFeatureTransport>()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
 
         builder.RegisterInstance(new StdioMcpTransportOptions())
             .SingleInstance();
@@ -71,6 +72,14 @@ public sealed class InfrastructureModule : Module
 
         builder.RegisterType<StreamableHttpMcpSessionTransport>()
             .As<IStreamableHttpMcpSessionTransport>()
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
+
+        builder.RegisterType<StreamableHttpMcpSessionContext>()
+            .AsSelf()
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
+
+        builder.RegisterType<StreamableHttpMcpSessionManager>()
+            .As<IStreamableHttpMcpSessionManager>()
             .SingleInstance();
 
         builder.RegisterType<StreamableHttpMcpRequestProcessor>()

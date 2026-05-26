@@ -28,7 +28,7 @@ public sealed class StreamableHttpMcpServerServiceTests
 
         using var container = BuildContainer(port);
         var hostedService = ResolveHttpHostedService(container);
-        var sessionTransport = container.Resolve<IStreamableHttpMcpSessionTransport>();
+        var sessionManager = container.Resolve<IStreamableHttpMcpSessionManager>();
 
         await hostedService.StartAsync(cancellationToken);
         await WaitForPortAsync(port, cancellationToken);
@@ -55,6 +55,9 @@ public sealed class StreamableHttpMcpServerServiceTests
             Assert.Equal(McpProtocolVersions.Current, initializeDocument.RootElement.GetProperty("result").GetProperty("protocolVersion").GetString());
 
             var sessionId = GetRequiredHeader(initializeResponse, StreamableHttpMcpHeaderNames.SessionId);
+            Assert.True(sessionManager.TryGetSession(sessionId, out var session));
+            Assert.NotNull(session);
+            var sessionTransport = session!.Transport;
 
             using (var initializedResponse = await SendJsonAsync(
                 client,
@@ -173,7 +176,7 @@ public sealed class StreamableHttpMcpServerServiceTests
 
         using var container = BuildContainer(port);
         var hostedService = ResolveHttpHostedService(container);
-        var sessionTransport = container.Resolve<IStreamableHttpMcpSessionTransport>();
+        var sessionManager = container.Resolve<IStreamableHttpMcpSessionManager>();
 
         await hostedService.StartAsync(cancellationToken);
         await WaitForPortAsync(port, cancellationToken);
@@ -196,6 +199,9 @@ public sealed class StreamableHttpMcpServerServiceTests
             Assert.Equal(HttpStatusCode.OK, initializeResponse.StatusCode);
 
             var sessionId = GetRequiredHeader(initializeResponse, StreamableHttpMcpHeaderNames.SessionId);
+            Assert.True(sessionManager.TryGetSession(sessionId, out var session));
+            Assert.NotNull(session);
+            var sessionTransport = session!.Transport;
 
             using (var initializedResponse = await SendJsonAsync(
                 client,
@@ -304,11 +310,6 @@ public sealed class StreamableHttpMcpServerServiceTests
             SseHeartbeatMilliseconds = 100
         })
             .AsSelf()
-            .SingleInstance();
-
-        builder.Register(context => context.Resolve<IStreamableHttpMcpSessionTransport>())
-            .As<IMcpClientFeatureInvoker>()
-            .As<IMcpTaskStatusNotifier>()
             .SingleInstance();
 
         builder.RegisterInstance(new StdioMcpTransportOptions

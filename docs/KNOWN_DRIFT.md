@@ -6,7 +6,6 @@ This file exists to be honest about what is not fully clean yet.
 
 - `MCPServer.Host.Sidecar` still wraps provider storage/vault types directly instead of depending only on higher-level provider services.
 - `MCPServer.Host` still has direct composition knowledge of both SSH provider and SSH MCP adapter packages.
-- Some sidecar implementation names still reflect earlier file-based behavior even though the provider is now SQLite-centered.
 
 ## Deliberate cleanup choices already made
 

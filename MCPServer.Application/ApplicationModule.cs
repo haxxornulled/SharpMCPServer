@@ -17,18 +17,18 @@ public sealed class ApplicationModule : Module
 
         builder.RegisterType<McpSessionState>()
             .As<IMcpSessionState>()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
 
         builder.RegisterInstance(new McpRequestExecutionOptions())
             .SingleInstance();
 
         builder.RegisterType<McpRequestExecutionRegistry>()
             .As<IMcpRequestExecutionRegistry>()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
 
         builder.RegisterType<McpLoggingState>()
             .As<IMcpLoggingState>()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
 
         builder.RegisterType<NoOpClientFeatureInvoker>()
             .As<IMcpClientFeatureInvoker>()
@@ -47,11 +47,11 @@ public sealed class ApplicationModule : Module
         builder.RegisterType<McpTaskRegistry>()
             .As<IMcpTaskRegistry>()
             .AsSelf()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
 
         builder.RegisterType<McpRequestDispatcher>()
             .As<IMcpRequestDispatcher>()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
 
         RegisterMethodHandler<InitializeHandler>(builder, McpMethods.Initialize);
         RegisterMethodHandler<InitializedNotificationHandler>(builder, McpMethods.NotificationsInitialized);
@@ -86,25 +86,25 @@ public sealed class ApplicationModule : Module
 
         builder.RegisterType<McpToolRegistry>()
             .As<IMcpToolRegistry>()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
 
         builder.RegisterInstance(new McpResourceRegistryOptions())
             .SingleInstance();
 
         builder.RegisterType<McpResourceRegistry>()
             .As<IMcpResourceRegistry>()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
 
         builder.RegisterType<McpResourceSubscriptionRegistry>()
             .As<IMcpResourceSubscriptionRegistry>()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
 
         builder.RegisterInstance(new McpPromptRegistryOptions())
             .SingleInstance();
 
         builder.RegisterType<McpPromptRegistry>()
             .As<IMcpPromptRegistry>()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
     }
 
     private static void RegisterMethodHandler<THandler>(ContainerBuilder builder, string method)
@@ -112,7 +112,7 @@ public sealed class ApplicationModule : Module
     {
         builder.RegisterType<THandler>()
             .Keyed<IMcpMethodHandler>(method)
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
     }
 
     private static void RegisterTool<TTool>(ContainerBuilder builder, string name)
@@ -121,7 +121,7 @@ public sealed class ApplicationModule : Module
         builder.RegisterType<TTool>()
             .Keyed<IMcpTool>(name)
             .As<IMcpTool>()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
     }
     private static void RegisterResource<TResource>(ContainerBuilder builder, string uri)
         where TResource : IMcpResource
@@ -129,7 +129,7 @@ public sealed class ApplicationModule : Module
         builder.RegisterType<TResource>()
             .Keyed<IMcpResource>(uri)
             .As<IMcpResource>()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
     }
 
     private static void RegisterPrompt<TPrompt>(ContainerBuilder builder, string name)
@@ -138,6 +138,6 @@ public sealed class ApplicationModule : Module
         builder.RegisterType<TPrompt>()
             .Keyed<IMcpPrompt>(name)
             .As<IMcpPrompt>()
-            .SingleInstance();
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
     }
 }

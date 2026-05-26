@@ -3,6 +3,23 @@
 This document follows the release path from .NET down into Python packaging.
 It is the canonical install flow for the NativeAOT AgentRouter bridge.
 
+## Release path
+
+```mermaid
+flowchart TD
+    Start["Start at repo root"] --> Verify["1. Restore, build, and test the .NET solution"]
+    Verify -->|If you only need .NET validation| StopDotNet["Stop here"]
+    Verify --> Publish["2. Publish the NativeAOT bridge"]
+    Publish --> Sync["Run scripts/Sync-PythonBridge.ps1\ncopy the native payload into python/src/.../native/"]
+    Sync --> Wheel{"Build wheel?"}
+    Wheel -->|Yes| BuildWheel["Create a platform wheel in python/dist/"]
+    Wheel -->|No| SkipWheel["Skip wheel build\n(native payload already synced)"]
+    BuildWheel --> Install["3. Install the wheel into the target Python environment"]
+    SkipWheel --> Install
+    Install --> Smoke["4. Smoke test the installed wheel from a clean temp directory"]
+    Smoke --> Done["Release path complete"]
+```
+
 ## Expected environment
 
 - .NET SDK 10.x

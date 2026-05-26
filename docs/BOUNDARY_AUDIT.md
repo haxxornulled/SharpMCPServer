@@ -62,4 +62,8 @@ Treat any new provider-specific noun found under the AgentRouter core packages a
 
 ## Server-Initiated Client Feature Runtime
 
-Implemented on the stdio server edge through `IMcpClientFeatureInvoker` and `StdioMcpClientFeatureTransport`, with tool entry points for `client.sample`, `client.elicit.form`, and `client.elicit.url`.
+Implemented across both the stdio and Streamable HTTP edges through `IMcpClientFeatureInvoker`, `StdioMcpClientFeatureTransport`, and `StreamableHttpMcpSessionTransport`, with tool entry points for `client.sample`, `client.elicit.form`, and `client.elicit.url`.
+
+Task status notifications are also published through the same runtime boundary so that task-augmented requests stay observable across both transports.
+
+See [docs/SPEC_COMPLIANCE.md](SPEC_COMPLIANCE.md) for the current protocol implementation matrix before adding more boundary cases.

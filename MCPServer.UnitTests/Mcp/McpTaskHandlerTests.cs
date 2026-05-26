@@ -20,8 +20,9 @@ public sealed class McpTaskHandlerTests
     public async Task Tasks_List_Get_Result_And_Cancel_Work_For_Seeded_Task()
     {
         using var container = BuildContainer();
-        var parser = container.Resolve<IJsonRpcMessageParser>();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
+        var parser = sessionScope.Resolve<IJsonRpcMessageParser>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         _ = await InitializeAsync(parser, dispatcher);
 
@@ -52,8 +53,9 @@ public sealed class McpTaskHandlerTests
     public async Task Tasks_Get_And_Cancel_Return_InvalidParams_For_Missing_Task()
     {
         using var container = BuildContainer();
-        var parser = container.Resolve<IJsonRpcMessageParser>();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
+        var parser = sessionScope.Resolve<IJsonRpcMessageParser>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         _ = await InitializeAsync(parser, dispatcher);
 

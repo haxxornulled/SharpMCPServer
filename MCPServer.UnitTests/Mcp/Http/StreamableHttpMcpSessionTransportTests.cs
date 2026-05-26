@@ -22,7 +22,7 @@ public sealed class StreamableHttpMcpSessionTransportTests
         var cancellationToken = TestContext.Current.CancellationToken;
         using var container = BuildContainer();
         var processor = container.Resolve<IStreamableHttpMcpRequestProcessor>();
-        var transport = container.Resolve<IStreamableHttpMcpSessionTransport>();
+        var sessionManager = container.Resolve<IStreamableHttpMcpSessionManager>();
 
         var initializeResponse = await processor.ProcessAsync(
             CreateRequest(
@@ -38,6 +38,9 @@ public sealed class StreamableHttpMcpSessionTransportTests
         Assert.Equal(HttpStatusCode.OK, initializeResponse.StatusCode);
         Assert.True(initializeResponse.Headers.TryGetValue(StreamableHttpMcpHeaderNames.SessionId, out var sessionId));
         Assert.False(string.IsNullOrWhiteSpace(sessionId));
+        Assert.True(sessionManager.TryGetSession(sessionId, out var session));
+        Assert.NotNull(session);
+        var transport = session!.Transport;
 
         var initializedResponse = await processor.ProcessAsync(
             CreateRequest(
@@ -126,7 +129,7 @@ public sealed class StreamableHttpMcpSessionTransportTests
             MaxSessionHistoryMessages = 2
         });
         var processor = container.Resolve<IStreamableHttpMcpRequestProcessor>();
-        var transport = container.Resolve<IStreamableHttpMcpSessionTransport>();
+        var sessionManager = container.Resolve<IStreamableHttpMcpSessionManager>();
 
         var initializeResponse = await processor.ProcessAsync(
             CreateRequest(
@@ -142,6 +145,9 @@ public sealed class StreamableHttpMcpSessionTransportTests
         Assert.Equal(HttpStatusCode.OK, initializeResponse.StatusCode);
         Assert.True(initializeResponse.Headers.TryGetValue(StreamableHttpMcpHeaderNames.SessionId, out var sessionId));
         Assert.False(string.IsNullOrWhiteSpace(sessionId));
+        Assert.True(sessionManager.TryGetSession(sessionId, out var session));
+        Assert.NotNull(session);
+        var transport = session!.Transport;
 
         var initializedResponse = await processor.ProcessAsync(
             CreateRequest(
@@ -214,7 +220,7 @@ public sealed class StreamableHttpMcpSessionTransportTests
         var cancellationToken = TestContext.Current.CancellationToken;
         using var container = BuildContainer();
         var processor = container.Resolve<IStreamableHttpMcpRequestProcessor>();
-        var transport = container.Resolve<IStreamableHttpMcpSessionTransport>();
+        var sessionManager = container.Resolve<IStreamableHttpMcpSessionManager>();
 
         var initializeResponse = await processor.ProcessAsync(
             CreateRequest(
@@ -230,13 +236,16 @@ public sealed class StreamableHttpMcpSessionTransportTests
         Assert.Equal(HttpStatusCode.OK, initializeResponse.StatusCode);
         Assert.True(initializeResponse.Headers.TryGetValue(StreamableHttpMcpHeaderNames.SessionId, out var sessionId));
         Assert.False(string.IsNullOrWhiteSpace(sessionId));
+        Assert.True(sessionManager.TryGetSession(sessionId, out var session));
+        Assert.NotNull(session);
+        var transport = session!.Transport;
 
         await using var stream = new RecordingStream();
         using var streamCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var openStreamTask = transport.OpenEventStreamAsync(stream, lastEventId: null, streamCancellationSource.Token).AsTask();
 
         await stream.WaitForWriteCountAsync(1, TimeSpan.FromSeconds(5), cancellationToken);
-        transport.TerminateSession();
+        Assert.True(sessionManager.TryTerminateSession(sessionId));
         await openStreamTask.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
 
         Assert.False(transport.HasActiveSession);
@@ -252,7 +261,7 @@ public sealed class StreamableHttpMcpSessionTransportTests
             MaxSessionHistoryMessages = 2
         });
         var processor = container.Resolve<IStreamableHttpMcpRequestProcessor>();
-        var transport = container.Resolve<IStreamableHttpMcpSessionTransport>();
+        var sessionManager = container.Resolve<IStreamableHttpMcpSessionManager>();
 
         var initializeResponse = await processor.ProcessAsync(
             CreateRequest(
@@ -268,6 +277,9 @@ public sealed class StreamableHttpMcpSessionTransportTests
         Assert.Equal(HttpStatusCode.OK, initializeResponse.StatusCode);
         Assert.True(initializeResponse.Headers.TryGetValue(StreamableHttpMcpHeaderNames.SessionId, out var sessionId));
         Assert.False(string.IsNullOrWhiteSpace(sessionId));
+        Assert.True(sessionManager.TryGetSession(sessionId, out var session));
+        Assert.NotNull(session);
+        var transport = session!.Transport;
 
         var initializedResponse = await processor.ProcessAsync(
             CreateRequest(
@@ -336,7 +348,7 @@ public sealed class StreamableHttpMcpSessionTransportTests
         Assert.Equal(HttpStatusCode.Conflict, foreignStatusCode);
         Assert.Contains("does not match", foreignError, StringComparison.OrdinalIgnoreCase);
 
-        transport.TerminateSession();
+        Assert.True(sessionManager.TryTerminateSession(sessionId));
 
         Assert.False(transport.TryValidateEventStreamRequest($"{currentSessionId}:0", out var missingStatusCode, out var missingError));
         Assert.Equal(HttpStatusCode.NotFound, missingStatusCode);

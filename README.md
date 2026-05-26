@@ -4,6 +4,8 @@ MCPServer is a .NET 10 workspace for an MCP host, an SSH tool surface, AgentRout
 
 The host runs stdio by default. Streamable HTTP is available on loopback when enabled explicitly.
 
+Protocol baseline: MCP 2025-11-25. See [docs/SPEC_COMPLIANCE.md](docs/SPEC_COMPLIANCE.md) for the current implementation matrix.
+
 ## What ships here
 
 - `MCPServer.Host` is the main MCP server host.
@@ -13,6 +15,53 @@ The host runs stdio by default. Streamable HTTP is available on loopback when en
 - `MCPServer.Ssh` and `MCPServer.Tools.Ssh` own SSH policy/runtime and MCP tool exposure.
 - `python/` contains the `ctypes` wrapper for the NativeAOT bridge.
 - `scripts/Sync-PythonBridge.ps1` publishes the native bridge, syncs the Python package payload, and can build the wheel.
+
+## Architecture at a glance
+
+Solid arrows show composition and dependency direction.
+
+```mermaid
+flowchart LR
+    subgraph ClientSide["Client side"]
+        Console["MCPServer.Client.Console"]
+        ClientLib["MCPServer.Client"]
+        ClientInfra["MCPServer.Client.Infrastructure"]
+        Python["python/"]
+        Native["MCPServer.AgentRouter.PythonBridge.Native"]
+    end
+
+    subgraph HostSide["Host side"]
+        MainHost["MCPServer.Host"]
+        Sidecar["MCPServer.Host.Sidecar"]
+        Infra["MCPServer.Infrastructure"]
+        App["MCPServer.Application"]
+        Ssh["MCPServer.Ssh"]
+        SshTools["MCPServer.Tools.Ssh"]
+    end
+
+    subgraph RouterCore["AgentRouter core"]
+        ARAbs["Abstractions"]
+        ARDom["Domain"]
+        ARApp["Application"]
+        ARInfra["Infrastructure"]
+        ARHost["Hosting"]
+    end
+
+    Console --> ClientLib
+    Console --> ClientInfra
+    ClientInfra --> ClientLib
+
+    Python --> Native
+    Native --> ARApp
+
+    MainHost --> Infra
+    MainHost --> App
+    Sidecar --> Ssh
+    Infra --> App
+    SshTools --> Ssh
+
+    ARAbs --> ARDom --> ARApp --> ARInfra --> ARHost
+```
 
 ## Build and test
 
@@ -65,6 +114,7 @@ If you only want the wrapper package layout, see [python/README.md](python/READM
 - [docs/INSTALL.md](docs/INSTALL.md)
 - [docs/SSH_BOUNDARY.md](docs/SSH_BOUNDARY.md)
 - [docs/AGENT_ROUTER_BOUNDARY.md](docs/AGENT_ROUTER_BOUNDARY.md)
+- [docs/SPEC_COMPLIANCE.md](docs/SPEC_COMPLIANCE.md)
 - [docs/KNOWN_DRIFT.md](docs/KNOWN_DRIFT.md)
 
 ## Repository rules

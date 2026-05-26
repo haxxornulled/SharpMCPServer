@@ -4,7 +4,6 @@ using MCPServer.Ssh.Infrastructure;
 using MCPServer.Ssh.Interfaces;
 using MCPServer.Ssh.Models;
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace MCPServer.Ssh.Stores;
@@ -12,23 +11,18 @@ namespace MCPServer.Ssh.Stores;
 public sealed class SqliteSshProfileStore : ISshProfileManagementStore
 {
     private const string DefaultDatabaseRelativePath = "ssh/ssh-store.db";
+    private const string SchemaName = "ssh-profiles";
     private const string SourcePrefix = "sqlite:";
 
     private readonly IOptionsMonitor<SshToolSettings> _settings;
     private readonly ISshPathResolver _pathResolver;
-    private readonly FileSystemSshProfileStore _jsonImportStore;
-    private readonly ILogger<SqliteSshProfileStore> _logger;
 
     public SqliteSshProfileStore(
         IOptionsMonitor<SshToolSettings> settings,
-        ISshPathResolver pathResolver,
-        FileSystemSshProfileStore jsonImportStore,
-        ILogger<SqliteSshProfileStore> logger)
+        ISshPathResolver pathResolver)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
-        _jsonImportStore = jsonImportStore ?? throw new ArgumentNullException(nameof(jsonImportStore));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public async ValueTask<Fin<SshProfileCatalog>> LoadProfilesAsync(CancellationToken cancellationToken)
@@ -38,31 +32,21 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
         try
         {
             var databasePath = ResolveDatabasePath();
-            await using var connection = await OpenInitializedConnectionAsync(cancellationToken).ConfigureAwait(false);
-            var profileCount = await CountProfilesAsync(connection, cancellationToken).ConfigureAwait(false);
-            var importedSources = await ImportJsonProfilesOnEmptyAsync(connection, profileCount, cancellationToken).ConfigureAwait(false);
-            if (importedSources.Length > 0)
-            {
-                profileCount = await CountProfilesAsync(connection, cancellationToken).ConfigureAwait(false);
-            }
-
+            await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
             var profiles = await LoadProfilesFromDatabaseAsync(connection, databasePath, cancellationToken).ConfigureAwait(false);
-            var sources = new List<SshProfileSourceStatus>
-            {
-                new()
-                {
-                    Path = databasePath,
-                    Exists = File.Exists(databasePath),
-                    ProfileCount = profileCount
-                }
-            };
-
-            sources.AddRange(importedSources);
 
             return Fin.Succ(new SshProfileCatalog
             {
                 Profiles = profiles,
-                Sources = sources
+                Sources = new List<SshProfileSourceStatus>
+                {
+                    new()
+                    {
+                        Path = databasePath,
+                        Exists = File.Exists(databasePath),
+                        ProfileCount = profiles.Count
+                    }
+                }
             });
         }
         catch (OperationCanceledException)
@@ -98,8 +82,8 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
         try
         {
             var key = NormalizeProfileName(name);
-            await using var connection = await OpenInitializedConnectionAsync(cancellationToken).ConfigureAwait(false);
-            await ImportJsonProfilesOnEmptyAsync(connection, await CountProfilesAsync(connection, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            var databasePath = ResolveDatabasePath();
+            await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
             var affected = await ExecuteNonQueryAsync(
@@ -166,29 +150,31 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
         Func<SshProfileDefinition, SshProfileUpsertRequest> requestFactory,
         CancellationToken cancellationToken)
     {
-        var catalog = await LoadProfilesAsync(cancellationToken).ConfigureAwait(false);
-        if (catalog.IsFail)
-        {
-            return catalog.Match(
-                Succ: static _ => throw new InvalidOperationException("Unexpected SSH profile load success while handling failure."),
-                Fail: error => Fin.Fail<SshProfileDefinition>(error));
-        }
-
-        var profiles = catalog.Match(
-            Succ: static value => value.Profiles,
-            Fail: static _ => throw new InvalidOperationException("Unexpected SSH profile load failure while handling success."));
+        var databasePath = ResolveDatabasePath();
         var key = NormalizeProfileName(profileName);
-        if (!profiles.TryGetValue(key, out var existing))
+        await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
+        var existing = await LoadProfileByNameAsync(connection, databasePath, key, cancellationToken).ConfigureAwait(false);
+        if (existing is null)
         {
             return Fin.Fail<SshProfileDefinition>(LanguageExt.Common.Error.New($"SSH profile '{key}' was not found."));
         }
 
-        return await SaveProfileAsync(key, requestFactory(existing), replace: false, cancellationToken).ConfigureAwait(false);
+        return await SaveProfileAsync(key, requestFactory(existing), existing, replace: false, cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask<Fin<SshProfileDefinition>> SaveProfileAsync(
         string name,
         SshProfileUpsertRequest request,
+        bool replace,
+        CancellationToken cancellationToken)
+    {
+        return await SaveProfileAsync(name, request, existing: null, replace, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask<Fin<SshProfileDefinition>> SaveProfileAsync(
+        string name,
+        SshProfileUpsertRequest request,
+        SshProfileDefinition? existing,
         bool replace,
         CancellationToken cancellationToken)
     {
@@ -199,13 +185,12 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
         {
             var key = NormalizeProfileName(name);
             var databasePath = ResolveDatabasePath();
-            await using var connection = await OpenInitializedConnectionAsync(cancellationToken).ConfigureAwait(false);
-            await ImportJsonProfilesOnEmptyAsync(connection, await CountProfilesAsync(connection, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
 
-            var existing = replace
+            var effectiveExisting = replace
                 ? null
-                : await LoadProfileByNameAsync(connection, databasePath, key, cancellationToken).ConfigureAwait(false);
-            var profile = BuildProfile(key, request, existing, replace);
+                : existing ?? await LoadProfileByNameAsync(connection, databasePath, key, cancellationToken).ConfigureAwait(false);
+            var profile = BuildProfile(key, request, effectiveExisting, replace);
 
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
             await UpsertProfileCoreAsync(connection, transaction, profile, cancellationToken).ConfigureAwait(false);
@@ -223,72 +208,30 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
         }
     }
 
-    private async ValueTask<SqliteConnection> OpenInitializedConnectionAsync(CancellationToken cancellationToken)
+    private async ValueTask<SqliteConnection> OpenInitializedConnectionAsync(
+        string databasePath,
+        CancellationToken cancellationToken)
     {
-        var databasePath = ResolveDatabasePath();
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath) ?? AppContext.BaseDirectory);
 
         var connection = new SqliteConnection(BuildConnectionString(databasePath));
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await EnsureSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
-        return connection;
-    }
-
-    private async ValueTask<SshProfileSourceStatus[]> ImportJsonProfilesOnEmptyAsync(
-        SqliteConnection connection,
-        int profileCount,
-        CancellationToken cancellationToken)
-    {
-        var settings = SshToolSettings.Normalize(_settings.CurrentValue);
-        if (profileCount != 0 || !settings.ImportProfilesFromJsonOnEmpty)
+        try
         {
-            return Array.Empty<SshProfileSourceStatus>();
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await ConfigureConnectionAsync(connection, cancellationToken).ConfigureAwait(false);
+            await SqliteSshDatabaseInitializationCoordinator.EnsureInitializedAsync(
+                databasePath,
+                SchemaName,
+                connection,
+                InitializeSchemaAsync,
+                cancellationToken).ConfigureAwait(false);
+            return connection;
         }
-
-        return await ImportJsonProfilesIfAvailableAsync(connection, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async ValueTask<SshProfileSourceStatus[]> ImportJsonProfilesIfAvailableAsync(
-        SqliteConnection connection,
-        CancellationToken cancellationToken)
-    {
-        var loaded = await _jsonImportStore.LoadProfilesAsync(cancellationToken).ConfigureAwait(false);
-        if (loaded.IsFail)
+        catch
         {
-            return loaded.Match(
-                Succ: static _ => throw new InvalidOperationException("Unexpected JSON SSH profile import success while handling failure."),
-                Fail: error => new[]
-                {
-                    new SshProfileSourceStatus
-                    {
-                        Path = "json-import",
-                        Exists = false,
-                        ProfileCount = 0,
-                        Error = error.Message
-                    }
-                });
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
         }
-
-        var catalog = loaded.Match(
-            Succ: static value => value,
-            Fail: static _ => throw new InvalidOperationException("Unexpected JSON SSH profile import failure while handling success."));
-
-        if (catalog.Profiles.Count == 0)
-        {
-            return catalog.Sources.ToArray();
-        }
-
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-
-        foreach (var profile in catalog.Profiles.Values)
-        {
-            await UpsertProfileCoreAsync(connection, transaction, profile, cancellationToken).ConfigureAwait(false);
-        }
-
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        _logger.LogInformation("Imported {ProfileCount} SSH profile(s) into SQLite profile store.", catalog.Profiles.Count);
-
-        return catalog.Sources.ToArray();
     }
 
     private string ResolveDatabasePath()
@@ -304,16 +247,25 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
         var builder = new SqliteConnectionStringBuilder
         {
             DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Default,
-            Pooling = false
+            Pooling = true,
+            DefaultTimeout = 30
         };
 
         return builder.ToString();
     }
 
-    private static async ValueTask EnsureSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    private static async ValueTask ConfigureConnectionAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         await ExecuteNonQueryAsync(connection, null, "PRAGMA foreign_keys = ON;", cancellationToken).ConfigureAwait(false);
+        await ExecuteNonQueryAsync(connection, null, "PRAGMA busy_timeout = 5000;", cancellationToken).ConfigureAwait(false);
+        await ExecuteNonQueryAsync(connection, null, "PRAGMA synchronous = NORMAL;", cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask InitializeSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await ExecuteScalarAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken).ConfigureAwait(false);
 
         await ExecuteNonQueryAsync(connection, null, """
             CREATE TABLE IF NOT EXISTS ssh_profiles (
@@ -356,24 +308,6 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
                 FOREIGN KEY (profile_name) REFERENCES ssh_profiles(name) ON DELETE CASCADE
             );
             """, cancellationToken).ConfigureAwait(false);
-    }
-
-    private static async ValueTask<int> CountProfilesAsync(SqliteConnection connection, CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM ssh_profiles;";
-        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        return result is long value ? checked((int)value) : 0;
-    }
-
-    private static async ValueTask<SshProfileDefinition?> LoadProfileByNameAsync(
-        SqliteConnection connection,
-        string databasePath,
-        string profileName,
-        CancellationToken cancellationToken)
-    {
-        var profiles = await LoadProfilesFromDatabaseAsync(connection, databasePath, cancellationToken).ConfigureAwait(false);
-        return profiles.TryGetValue(profileName, out var profile) ? profile : null;
     }
 
     private static async ValueTask<IReadOnlyDictionary<string, SshProfileDefinition>> LoadProfilesFromDatabaseAsync(
@@ -440,6 +374,69 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
         return profiles;
     }
 
+    private static async ValueTask<SshProfileDefinition?> LoadProfileByNameAsync(
+        SqliteConnection connection,
+        string databasePath,
+        string profileName,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                name,
+                display_name,
+                host,
+                port,
+                username,
+                private_key_path,
+                private_key_passphrase_environment_variable,
+                password_environment_variable,
+                host_key_sha256,
+                accept_unknown_host_key,
+                working_directory,
+                allow_sudo_command,
+                allow_all_commands,
+                privileged,
+                allowed_root
+            FROM ssh_profiles
+            WHERE name = $name COLLATE NOCASE;
+            """;
+        command.Parameters.AddWithValue("$name", profileName);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        var allowedCommands = await LoadStringValuesForProfileAsync(connection, "ssh_profile_allowed_commands", profileName, cancellationToken).ConfigureAwait(false);
+        var deniedCommands = await LoadStringValuesForProfileAsync(connection, "ssh_profile_denied_commands", profileName, cancellationToken).ConfigureAwait(false);
+        var allowedPathPrefixes = await LoadStringValuesForProfileAsync(connection, "ssh_profile_allowed_remote_path_prefixes", profileName, cancellationToken).ConfigureAwait(false);
+
+        return new SshProfileDefinition
+        {
+            Name = profileName,
+            DisplayName = reader.GetString(1),
+            Host = reader.GetString(2),
+            Port = reader.GetInt32(3),
+            Username = reader.GetString(4),
+            PrivateKeyPath = ReadNullableString(reader, 5),
+            PrivateKeyPassphraseEnvironmentVariable = ReadNullableString(reader, 6),
+            PasswordEnvironmentVariable = ReadNullableString(reader, 7),
+            HostKeySha256 = ReadNullableString(reader, 8),
+            AcceptUnknownHostKey = ReadBoolean(reader, 9),
+            WorkingDirectory = ReadNullableString(reader, 10),
+            AllowSudoCommand = ReadBoolean(reader, 11),
+            AllowAllCommands = ReadBoolean(reader, 12),
+            Privileged = ReadBoolean(reader, 13),
+            AllowedRoot = ReadBoolean(reader, 14),
+            AllowedCommands = allowedCommands,
+            DeniedCommands = deniedCommands,
+            AllowedRemotePathPrefixes = allowedPathPrefixes,
+            Source = SourcePrefix + databasePath
+        };
+    }
+
     private static async ValueTask<IReadOnlyDictionary<string, IReadOnlyList<string>>> LoadStringValuesAsync(
         SqliteConnection connection,
         string tableName,
@@ -472,6 +469,32 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
             pair => pair.Key,
             pair => (IReadOnlyList<string>)pair.Value.ToArray(),
             StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static async ValueTask<IReadOnlyList<string>> LoadStringValuesForProfileAsync(
+        SqliteConnection connection,
+        string tableName,
+        string profileName,
+        CancellationToken cancellationToken)
+    {
+        var values = new List<string>();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT value
+            FROM {tableName}
+            WHERE profile_name = $profileName COLLATE NOCASE
+            ORDER BY ordinal;
+            """;
+        command.Parameters.AddWithValue("$profileName", profileName);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            values.Add(reader.GetString(0));
+        }
+
+        return values.ToArray();
     }
 
     private static async ValueTask UpsertProfileCoreAsync(
@@ -632,6 +655,16 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
         }
 
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<object?> ExecuteScalarAsync(
+        SqliteConnection connection,
+        string commandText,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = commandText;
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static IReadOnlyList<string> GetStringValues(

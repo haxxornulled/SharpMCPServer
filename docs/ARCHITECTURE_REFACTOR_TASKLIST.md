@@ -31,8 +31,8 @@ Composition/admin:
 
 ## Remaining work
 - Verify no remaining provider-specific nouns/references exist under MCPServer.AgentRouter.* core.
-- Verify all tests compile and pass in a .NET 10 environment.
-- Review Host composition for any further edge-only provider binding cleanup.
+- Review Host and Host.Sidecar composition for any further edge-only provider binding cleanup.
+- Keep the repo docs aligned with the current stable MCP spec matrix in [docs/SPEC_COMPLIANCE.md](SPEC_COMPLIANCE.md).
 
 
 ## Safe next-step discipline
@@ -59,10 +59,9 @@ Composition/admin:
 - Added in-memory task registry and task capability advertising.
 - Added verifier coverage for task parity files.
 
+## Current runtime coverage
 
-## Next runtime parity gaps
-
-- End-to-end client-side handling for server-initiated sampling/elicitation in `MCPServer.Client`
-- Client-owned `notifications/tasks/status` emission for task-augmented requests
-- Streamable HTTP transport
-- Authorization / OIDC / WWW-Authenticate challenge surface
+- Server-initiated sampling and elicitation are implemented across stdio and Streamable HTTP.
+- Task status notifications are emitted by the server-side task registry and carried by the client transport layers.
+- Streamable HTTP transport and authorization / OIDC handling are implemented and exercised by the live smoke tests.
+- Refer to [docs/SPEC_COMPLIANCE.md](SPEC_COMPLIANCE.md) for the current protocol matrix before adding new runtime surfaces.

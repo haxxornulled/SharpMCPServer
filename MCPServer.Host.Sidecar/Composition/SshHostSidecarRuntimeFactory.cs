@@ -33,10 +33,8 @@ internal static class SshHostSidecarRuntimeFactory
         {
             Enabled = true,
             ProfileDatabasePath = options.Value("profile-db-path") ?? options.Value("profile-database-path") ?? DefaultProfileDatabasePath(options),
-            ProfilePath = options.Value("profile-path") ?? DefaultProfilePath(options),
             VaultPath = options.Value("vault-path") ?? DefaultVaultPath(options),
             VaultKeyPath = options.Value("vault-key-path") ?? DefaultVaultKeyPath(options),
-            ImportProfilesFromJsonOnEmpty = options.BoolValue("import-profiles-from-json") ?? true,
             UseLocalCredentialVault = true
         });
     }
@@ -68,8 +66,6 @@ internal static class SshHostSidecarRuntimeFactory
     private static string DefaultVaultPath(SidecarOptions? options = null) => Path.Combine(DefaultBasePath(options), "ssh-vault.local.json");
 
     private static string DefaultVaultKeyPath(SidecarOptions? options = null) => Path.Combine(DefaultBasePath(options), "ssh-vault.key");
-
-    private static string DefaultProfilePath(SidecarOptions? options = null) => Path.Combine(DefaultBasePath(options), "ssh-profiles.local.json");
 
     private static string DefaultProfileDatabasePath(SidecarOptions? options = null) => Path.Combine(DefaultBasePath(options), "ssh-store.db");
 }

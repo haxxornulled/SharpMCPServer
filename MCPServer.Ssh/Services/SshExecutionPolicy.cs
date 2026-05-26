@@ -73,7 +73,7 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
 
         if (!catalog.Profiles.TryGetValue(profileName, out var profile))
         {
-            return Succeed(Denied($"Unknown SSH profile '{profileName}'. Configure it in McpTools:Ssh:ProfilePath, config/mcpserver/ssh-profiles.local.json, or the LocalAppData/McpServer/ssh/ssh-profiles.local.json profile file."));
+            return Succeed(Denied($"Unknown SSH profile '{profileName}'. Add it to the SQLite SSH profile database via the sidecar profile commands or configure McpTools:Ssh:ProfileDatabasePath."));
         }
 
         if (string.IsNullOrWhiteSpace(profile.Host))

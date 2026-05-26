@@ -18,13 +18,7 @@ public sealed class SshToolSettings
 
     public int MaxOutputChars { get; set; } = 20_000;
 
-    public string? ProfilePath { get; set; }
-
-    public string ProfileStoreKind { get; set; } = SshProfileStoreKinds.Sqlite;
-
     public string? ProfileDatabasePath { get; set; }
-
-    public bool ImportProfilesFromJsonOnEmpty { get; set; } = true;
 
     public string? TraceDirectory { get; set; }
 
@@ -80,10 +74,7 @@ public sealed class SshToolSettings
             AllowShellInterpreterInlineCommands = settings.AllowShellInterpreterInlineCommands,
             TimeoutSeconds = Math.Clamp(settings.TimeoutSeconds <= 0 ? 60 : settings.TimeoutSeconds, 1, 600),
             MaxOutputChars = Math.Clamp(settings.MaxOutputChars <= 0 ? 20_000 : settings.MaxOutputChars, 1, 1_000_000),
-            ProfilePath = TrimToNull(settings.ProfilePath),
-            ProfileStoreKind = NormalizeProfileStoreKind(settings.ProfileStoreKind),
             ProfileDatabasePath = TrimToNull(settings.ProfileDatabasePath),
-            ImportProfilesFromJsonOnEmpty = settings.ImportProfilesFromJsonOnEmpty,
             TraceDirectory = TrimToNull(settings.TraceDirectory),
             UseLocalCredentialVault = settings.UseLocalCredentialVault,
             VaultPath = TrimToNull(settings.VaultPath),
@@ -135,10 +126,7 @@ public sealed class SshToolSettings
             AllowShellInterpreterInlineCommands = ReadBool(configuration, "AllowShellInterpreterInlineCommands", defaultValue: false),
             TimeoutSeconds = Math.Clamp(ReadInt(configuration, "TimeoutSeconds", defaultValue: 60), 1, 600),
             MaxOutputChars = Math.Clamp(ReadInt(configuration, "MaxOutputChars", defaultValue: 20_000), 1, 1_000_000),
-            ProfilePath = TrimToNull(configuration["ProfilePath"]),
-            ProfileStoreKind = NormalizeProfileStoreKind(configuration["ProfileStoreKind"]),
             ProfileDatabasePath = TrimToNull(configuration["ProfileDatabasePath"]),
-            ImportProfilesFromJsonOnEmpty = ReadBool(configuration, "ImportProfilesFromJsonOnEmpty", defaultValue: true),
             TraceDirectory = TrimToNull(configuration["TraceDirectory"]),
             UseLocalCredentialVault = ReadBool(configuration, "UseLocalCredentialVault", defaultValue: true),
             VaultPath = TrimToNull(configuration["VaultPath"]),
@@ -204,14 +192,6 @@ public sealed class SshToolSettings
         return values.Length == 0 ? defaultValues.ToList() : values.ToList();
     }
 
-    private static string NormalizeProfileStoreKind(string? value)
-    {
-        return TrimToNull(value) is { } normalized &&
-               normalized.Equals(SshProfileStoreKinds.Json, StringComparison.OrdinalIgnoreCase)
-            ? SshProfileStoreKinds.Json
-            : SshProfileStoreKinds.Sqlite;
-    }
-
     private static List<string> NormalizeStringList(IEnumerable<string>? values, IReadOnlyList<string> defaultValues)
     {
         var normalized = values is null
@@ -232,11 +212,4 @@ public sealed class SshToolSettings
             ? trimmed.Trim()
             : null;
     }
-}
-
-
-public static class SshProfileStoreKinds
-{
-    public const string Sqlite = "sqlite";
-    public const string Json = "json";
 }

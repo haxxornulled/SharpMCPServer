@@ -8,6 +8,7 @@ using MCPServer.Client.StreamableHttp;
 using MCPServer.Domain.Mcp;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
+using System.Net.Http;
 
 namespace MCPServer.Client.ConsoleApp;
 
@@ -70,6 +71,7 @@ internal static class McpClientConsoleSessionComposition
             return Fin.Fail<IMcpClientSession>(Error.New("--server-path is required for stdio mode."));
         }
 
+        var samplingHandler = CreateSamplingHandler(options);
         var processOptions = new McpClientProcessOptions
         {
             ServerExecutablePath = options.ServerPath,
@@ -77,7 +79,9 @@ internal static class McpClientConsoleSessionComposition
             WorkingDirectory = options.WorkingDirectory,
             ClientName = "mcpserver-client-console",
             ClientTitle = "MCP Server Client Console",
-            ClientVersion = "1.0.0"
+            ClientVersion = "1.0.0",
+            SupportsSampling = samplingHandler is not null,
+            SamplingRequestHandler = samplingHandler
         };
 
         var started = await StdioMcpClientSession.StartAsync(processOptions, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -102,6 +106,7 @@ internal static class McpClientConsoleSessionComposition
             return Fin.Fail<IMcpClientSession>(Error.New("HTTP transport requires an IHttpClientFactory composition scope."));
         }
 
+        var samplingHandler = CreateSamplingHandler(options);
         var defaultHeaders = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(options.BearerToken))
         {
@@ -116,6 +121,8 @@ internal static class McpClientConsoleSessionComposition
             ClientName = "mcpserver-client-console",
             ClientTitle = "MCP Server Client Console",
             ClientVersion = "1.0.0",
+            SupportsSampling = samplingHandler is not null,
+            SamplingRequestHandler = samplingHandler,
             HttpClientFactory = httpClientFactory,
             HttpClientName = "mcpserver-client-console-http",
             OpenServerEventStream = options.OpenServerEventStream,
@@ -128,6 +135,11 @@ internal static class McpClientConsoleSessionComposition
         return started.Match(
             Succ: static session => Fin.Succ<IMcpClientSession>(session),
             Fail: static error => Fin.Fail<IMcpClientSession>(error));
+    }
+
+    private static IMcpClientSamplingHandler? CreateSamplingHandler(ConsoleOptions options)
+    {
+        return options.DemoSampling ? McpClientConsoleDemoSamplingHandler.Instance : null;
     }
 }
 
@@ -200,7 +212,13 @@ internal sealed class HttpClientFactoryScope : IDisposable
     public static HttpClientFactoryScope Create()
     {
         var services = new ServiceCollection();
-        services.AddHttpClient();
+        services.AddHttpClient("mcpserver-client-console-http")
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                MaxConnectionsPerServer = 32,
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2)
+            });
         var serviceProvider = services.BuildServiceProvider();
         return new HttpClientFactoryScope(serviceProvider);
     }

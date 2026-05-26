@@ -20,7 +20,7 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
     private readonly StreamableHttpMcpTransportOptions _options;
     private readonly IMcpHttpAuthorizationService _authorizationService;
     private readonly IMcpProtectedResourceMetadataProvider _metadataProvider;
-    private readonly IStreamableHttpMcpSessionTransport _sessionTransport;
+    private readonly IStreamableHttpMcpSessionManager _sessionManager;
     private readonly IStreamableHttpMcpRequestProcessor _processor;
     private readonly IJsonRpcResponseSerializer _serializer;
     private readonly ILogger<StreamableHttpMcpServerService> _logger;
@@ -29,7 +29,7 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
         StreamableHttpMcpTransportOptions options,
         IMcpHttpAuthorizationService authorizationService,
         IMcpProtectedResourceMetadataProvider metadataProvider,
-        IStreamableHttpMcpSessionTransport sessionTransport,
+        IStreamableHttpMcpSessionManager sessionManager,
         IStreamableHttpMcpRequestProcessor processor,
         IJsonRpcResponseSerializer serializer,
         ILogger<StreamableHttpMcpServerService> logger)
@@ -37,7 +37,7 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(authorizationService);
         ArgumentNullException.ThrowIfNull(metadataProvider);
-        ArgumentNullException.ThrowIfNull(sessionTransport);
+        ArgumentNullException.ThrowIfNull(sessionManager);
         ArgumentNullException.ThrowIfNull(processor);
         ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(logger);
@@ -45,7 +45,7 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
         _options = options;
         _authorizationService = authorizationService;
         _metadataProvider = metadataProvider;
-        _sessionTransport = sessionTransport;
+        _sessionManager = sessionManager;
         _processor = processor;
         _serializer = serializer;
         _logger = logger;
@@ -233,9 +233,15 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
             return;
         }
 
-        if (!_sessionTransport.TryValidateSessionRequest(request, isInitialize: false, out var sessionStatus, out var sessionError))
+        if (!_sessionManager.TryValidateSessionRequest(request, isInitialize: false, out var session, out var sessionStatus, out var sessionError))
         {
             await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(sessionStatus, sessionError).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (session is null)
+        {
+            await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(HttpStatusCode.NotFound, "Session not found.").ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -245,7 +251,7 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
             return;
         }
 
-        if (!_sessionTransport.TryValidateEventStreamRequest(request.GetHeader(StreamableHttpMcpHeaderNames.LastEventId), out var eventStreamStatus, out var eventStreamError))
+        if (!session.Transport.TryValidateEventStreamRequest(request.GetHeader(StreamableHttpMcpHeaderNames.LastEventId), out var eventStreamStatus, out var eventStreamError))
         {
             await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(eventStreamStatus, eventStreamError).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
             return;
@@ -259,12 +265,12 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
         response.Headers["Connection"] = "keep-alive";
         response.Headers["X-Accel-Buffering"] = "no";
 
-        if (_sessionTransport.SessionId is { } sessionId)
+        if (session.SessionId is { } sessionId)
         {
             response.Headers[StreamableHttpMcpHeaderNames.SessionId] = sessionId;
         }
 
-        await _sessionTransport.OpenEventStreamAsync(
+        await session.Transport.OpenEventStreamAsync(
             response.OutputStream,
             request.GetHeader(StreamableHttpMcpHeaderNames.LastEventId),
             cancellationToken).ConfigureAwait(false);
@@ -284,9 +290,15 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
             return;
         }
 
-        if (!_sessionTransport.TryValidateSessionRequest(request, isInitialize: false, out var sessionStatus, out var sessionError))
+        if (!_sessionManager.TryValidateSessionRequest(request, isInitialize: false, out var session, out var sessionStatus, out var sessionError))
         {
             await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(sessionStatus, sessionError).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (session is null)
+        {
+            await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(HttpStatusCode.NotFound, "Session not found.").ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -296,7 +308,12 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
             return;
         }
 
-        _sessionTransport.TerminateSession();
+        if (!_sessionManager.TryTerminateSession(session.SessionId))
+        {
+            await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(HttpStatusCode.NotFound, "Session not found.").ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         context.Response.StatusCode = (int)HttpStatusCode.NoContent;
         context.Response.ContentLength64 = 0;
         await context.Response.OutputStream.FlushAsync(cancellationToken).ConfigureAwait(false);

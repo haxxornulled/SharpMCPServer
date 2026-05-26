@@ -38,10 +38,6 @@ public sealed class SshProviderModule : Module
             .SingleInstance()
             .PreserveExistingDefaults();
 
-        builder.RegisterType<FileSystemSshProfileStore>()
-            .AsSelf()
-            .SingleInstance();
-
         builder.RegisterType<SqliteSshProfileStore>()
             .AsSelf()
             .SingleInstance();
@@ -58,13 +54,8 @@ public sealed class SshProviderModule : Module
 
         builder.Register(context =>
             {
-                var settings = SshToolSettings.Normalize(context.Resolve<IOptionsMonitor<SshToolSettings>>().CurrentValue);
-                return settings.ProfileStoreKind switch
-                {
-                    var profileStoreKind when profileStoreKind.Equals(SshProfileStoreKinds.Json, StringComparison.OrdinalIgnoreCase)
-                        => (ISshProfileStore)context.Resolve<FileSystemSshProfileStore>(),
-                    _ => context.Resolve<SqliteSshProfileStore>()
-                };
+                _ = SshToolSettings.Normalize(context.Resolve<IOptionsMonitor<SshToolSettings>>().CurrentValue);
+                return context.Resolve<SqliteSshProfileStore>();
             })
             .As<ISshProfileStore>()
             .SingleInstance()

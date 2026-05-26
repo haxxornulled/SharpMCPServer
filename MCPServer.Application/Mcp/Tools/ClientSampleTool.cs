@@ -9,11 +9,11 @@ public sealed class ClientSampleTool : IMcpTool
 {
     private static readonly JsonElement InputSchema = CreateInputSchema();
     private static readonly JsonElement OutputSchema = CreateOutputSchema();
-    private readonly IMcpClientFeatureInvoker _clientFeatures;
+    private readonly Func<IMcpClientFeatureInvoker> _clientFeaturesFactory;
 
-    public ClientSampleTool(IMcpClientFeatureInvoker clientFeatures)
+    public ClientSampleTool(Func<IMcpClientFeatureInvoker> clientFeaturesFactory)
     {
-        _clientFeatures = clientFeatures ?? throw new ArgumentNullException(nameof(clientFeatures));
+        _clientFeaturesFactory = clientFeaturesFactory ?? throw new ArgumentNullException(nameof(clientFeaturesFactory));
     }
 
     public McpToolDescriptor Descriptor { get; } = new McpToolDescriptor
@@ -68,7 +68,7 @@ public sealed class ClientSampleTool : IMcpTool
             MaxTokens = maxTokens
         };
 
-        var response = await _clientFeatures.CreateMessageAsync(request, cancellationToken).ConfigureAwait(false);
+        var response = await _clientFeaturesFactory().CreateMessageAsync(request, cancellationToken).ConfigureAwait(false);
         return response.Match(
             Succ: payload => Fin.Succ<ToolCallResult>(ToolCallResult.Text(payload.GetRawText(), structuredContent: payload)),
             Fail: error => Fin.Succ<ToolCallResult>(ToolCallResult.Text(error.Message, isError: true)));

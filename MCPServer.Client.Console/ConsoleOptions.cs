@@ -22,6 +22,8 @@ internal sealed class ConsoleOptions
 
     public bool UseOAuthInteractive { get; private init; }
 
+    public bool DemoSampling { get; private init; }
+
     public string? OAuthClientName { get; private init; }
 
     public Uri? OAuthClientUri { get; private init; }
@@ -56,6 +58,7 @@ internal sealed class ConsoleOptions
       --origin <origin>         Override HTTP Origin header in HTTP mode.
       --bearer-token <token>    Send a bearer token for HTTP mode.
       --oauth-interactive       Enable the OAuth authorization-code flow in HTTP mode.
+      --demo-sampling           Enable a deterministic local sampling/createMessage demo handler.
       --oauth-client-name <n>   Client name used for OAuth registration and UI labels.
       --oauth-client-uri <uri>   Client URI used during OAuth registration.
       --oauth-client-id <id>    Pre-registered OAuth client identifier.
@@ -70,6 +73,7 @@ internal sealed class ConsoleOptions
     Examples:
       MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0
       MCPServer.Client.Console --server-path .\MCPServer.Host.exe --tool ssh.profiles.list --arguments {}
+      MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0 --demo-sampling --tool client.sample --arguments {"prompt":"Say hello in one sentence."}
       MCPServer.Client.Console --endpoint http://127.0.0.1:3000/mcp/ --open-server-event-stream --tool server.info
       MCPServer.Client.Console --endpoint http://127.0.0.1:3000/mcp/ --oauth-interactive --oauth-client-id https://client.example.com/metadata.json --tool server.info
     """;
@@ -93,6 +97,7 @@ internal sealed class ConsoleOptions
         var serverArguments = new List<string>();
         bool? openServerEventStream = null;
         var useOAuthInteractive = false;
+        var demoSampling = false;
         var oauthUseDynamicClientRegistration = true;
         var showHelp = false;
 
@@ -133,6 +138,9 @@ internal sealed class ConsoleOptions
                     break;
                 case "--oauth-interactive":
                     useOAuthInteractive = true;
+                    break;
+                case "--demo-sampling":
+                    demoSampling = true;
                     break;
                 case "--oauth-client-name":
                     oauthClientName = ReadValue(args, ref i, arg);
@@ -294,6 +302,7 @@ internal sealed class ConsoleOptions
             Origin = origin,
             BearerToken = bearerToken,
             UseOAuthInteractive = useOAuthInteractive,
+            DemoSampling = demoSampling,
             OAuthClientName = oauthClientName,
             OAuthClientUri = oauthClientUri,
             OAuthClientId = oauthClientId,

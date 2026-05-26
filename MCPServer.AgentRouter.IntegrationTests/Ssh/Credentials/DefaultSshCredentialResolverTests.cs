@@ -116,6 +116,35 @@ public sealed class DefaultSshCredentialResolverTests
         }
     }
 
+    [Fact]
+    public async Task SqliteVault_Handles_Parallel_Writes_And_Reads()
+    {
+        await using var temp = TempSshCredentialDatabase.Create();
+        var vault = temp.CreateVault();
+
+        var upserts = Enumerable.Range(0, 24)
+            .Select(index => vault.UpsertEntryAsync(
+                $"secret-{index}",
+                $"value-{index}",
+                $"entry {index}",
+                TestContext.Current.CancellationToken)
+                .AsTask())
+            .ToArray();
+
+        await Task.WhenAll(upserts);
+
+        var entries = await vault.ListEntriesAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(24, entries.Count);
+
+        var resolved = await Task.WhenAll(
+            Enumerable.Range(0, 24).Select(index => vault.ResolveSecretAsync(
+                $"secret-{index}",
+                TestContext.Current.CancellationToken)
+                .AsTask()));
+
+        Assert.Equal(Enumerable.Range(0, 24).Select(index => $"value-{index}"), resolved);
+    }
+
     private sealed class TempSshCredentialDatabase : IAsyncDisposable
     {
         private readonly string _root;

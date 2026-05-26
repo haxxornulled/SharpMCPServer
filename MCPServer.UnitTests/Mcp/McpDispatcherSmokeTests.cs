@@ -19,8 +19,9 @@ public sealed class McpDispatcherSmokeTests
     public async Task Tools_List_Is_Blocked_Until_Initialized_Notification()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         var message = TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"tools/list"}
@@ -40,8 +41,9 @@ public sealed class McpDispatcherSmokeTests
     public async Task Initialize_Then_Initialized_Then_Tools_List_Works()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         var initialize = TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}
@@ -74,8 +76,9 @@ public sealed class McpDispatcherSmokeTests
     public async Task Server_Info_Tool_Call_Works()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         _ = TestFin.Success(await dispatcher.DispatchAsync(TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}
@@ -103,8 +106,9 @@ public sealed class McpDispatcherSmokeTests
     public async Task Server_Info_Tool_Call_With_Unexpected_Argument_Returns_Tool_Error()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         _ = TestFin.Success(await dispatcher.DispatchAsync(TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}
@@ -132,8 +136,9 @@ public sealed class McpDispatcherSmokeTests
     public async Task Initialize_Declares_Logging_Capability()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         var initialize = TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}
@@ -152,9 +157,10 @@ public sealed class McpDispatcherSmokeTests
     public async Task Logging_SetLevel_Updates_Logging_State()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
-        var loggingState = container.Resolve<IMcpLoggingState>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
+        var loggingState = sessionScope.Resolve<IMcpLoggingState>();
 
         _ = TestFin.Success(await dispatcher.DispatchAsync(TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}
@@ -180,8 +186,9 @@ public sealed class McpDispatcherSmokeTests
     public async Task Logging_SetLevel_Rejects_Invalid_Level()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         _ = TestFin.Success(await dispatcher.DispatchAsync(TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}
@@ -207,8 +214,9 @@ public sealed class McpDispatcherSmokeTests
     public async Task Request_With_Invalid_ProgressToken_Returns_Invalid_Params()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         _ = TestFin.Success(await dispatcher.DispatchAsync(TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}
@@ -234,8 +242,9 @@ public sealed class McpDispatcherSmokeTests
     public async Task Request_With_Valid_ProgressToken_Is_Accepted()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         _ = TestFin.Success(await dispatcher.DispatchAsync(TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}
@@ -258,8 +267,9 @@ public sealed class McpDispatcherSmokeTests
     public async Task Request_With_Invalid_Meta_Key_Returns_Invalid_Params()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         _ = TestFin.Success(await dispatcher.DispatchAsync(TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}
@@ -285,8 +295,9 @@ public sealed class McpDispatcherSmokeTests
     public async Task Tools_Call_With_Non_Object_Arguments_Returns_Invalid_Params()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         _ = TestFin.Success(await dispatcher.DispatchAsync(TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}
@@ -312,8 +323,9 @@ public sealed class McpDispatcherSmokeTests
     public async Task Reserved_JsonRpc_Method_Name_Is_Rejected()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         var request = TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"rpc.discover"}
@@ -333,9 +345,10 @@ public sealed class McpDispatcherSmokeTests
     public async Task Initialize_Stores_Client_Capabilities()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
-        var sessionState = container.Resolve<IMcpSessionState>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
+        var sessionState = sessionScope.Resolve<IMcpSessionState>();
 
         var initialize = TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"roots":{"listChanged":true},"sampling":{"tools":{},"context":{}},"elicitation":{"form":{},"url":{}},"tasks":{"list":{},"cancel":{},"requests":{"sampling":{"createMessage":{}},"elicitation":{"create":{}}}}},"clientInfo":{"name":"test","version":"1"}}}
@@ -363,8 +376,9 @@ public sealed class McpDispatcherSmokeTests
     public async Task Initialize_Rejects_Invalid_Client_Capability_Shape()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         var initialize = TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"roots":true},"clientInfo":{"name":"test","version":"1"}}}
@@ -383,9 +397,10 @@ public sealed class McpDispatcherSmokeTests
     public async Task Roots_ListChanged_Notification_Updates_Session_Revision_And_Produces_No_Response()
     {
         using var container = BuildContainer();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
         var parser = new JsonRpcMessageParser();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
-        var sessionState = container.Resolve<IMcpSessionState>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
+        var sessionState = sessionScope.Resolve<IMcpSessionState>();
 
         _ = TestFin.Success(await dispatcher.DispatchAsync(TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"roots":{"listChanged":true}},"clientInfo":{"name":"test","version":"1"}}}
@@ -413,3 +428,4 @@ public sealed class McpDispatcherSmokeTests
         return builder.Build();
     }
 }
+

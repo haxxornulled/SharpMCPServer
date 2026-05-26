@@ -12,6 +12,7 @@ namespace MCPServer.Ssh.Stores;
 public sealed class SqliteSshCredentialVault : ISshCredentialVault
 {
     private const string DefaultDatabaseRelativePath = "ssh/ssh-store.db";
+    private const string SchemaName = "ssh-credentials";
     private const string MasterKeyName = "default";
     private const string SchemaVersion = "1";
     private const string AlgorithmName = "aesgcm-sqlite-local-masterkey-v1";
@@ -19,7 +20,7 @@ public sealed class SqliteSshCredentialVault : ISshCredentialVault
     private const int NonceLengthBytes = 12;
     private const int TagLengthBytes = 16;
 
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> MasterKeyLocks = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly IOptionsMonitor<SshToolSettings> _settings;
     private readonly ISshPathResolver _pathResolver;
@@ -35,36 +36,27 @@ public sealed class SqliteSshCredentialVault : ISshCredentialVault
     public async ValueTask<IReadOnlyList<SshCredentialVaultEntry>> ListEntriesAsync(CancellationToken cancellationToken)
     {
         var databasePath = ResolveDatabasePath();
-        var gate = Locks.GetOrAdd(databasePath, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
-            await using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT name, environment_variable, description, created_at_utc, updated_at_utc
-                FROM ssh_credentials
-                ORDER BY name COLLATE NOCASE;
-                """;
+        await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT name, environment_variable, description, created_at_utc, updated_at_utc
+            FROM ssh_credentials
+            ORDER BY name COLLATE NOCASE;
+            """;
 
-            var entries = new List<SshCredentialVaultEntry>();
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                entries.Add(new SshCredentialVaultEntry(
-                    reader.GetString(0),
-                    reader.GetString(1),
-                    ReadNullableString(reader, 2),
-                    DateTimeOffset.Parse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind),
-                    DateTimeOffset.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind)));
-            }
-
-            return entries.ToArray();
-        }
-        finally
+        var entries = new List<SshCredentialVaultEntry>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            gate.Release();
+            entries.Add(new SshCredentialVaultEntry(
+                reader.GetString(0),
+                reader.GetString(1),
+                ReadNullableString(reader, 2),
+                DateTimeOffset.Parse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                DateTimeOffset.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind)));
         }
+
+        return entries.ToArray();
     }
 
     public async ValueTask<SshCredentialVaultEntry> UpsertEntryAsync(
@@ -76,90 +68,72 @@ public sealed class SqliteSshCredentialVault : ISshCredentialVault
         ArgumentNullException.ThrowIfNull(secret);
 
         var databasePath = ResolveDatabasePath();
-        var gate = Locks.GetOrAdd(databasePath, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
-            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
-            var key = NormalizeName(name);
-            var now = DateTimeOffset.UtcNow;
-            var existing = await LoadEntryForUpdateAsync(connection, transaction, key, cancellationToken).ConfigureAwait(false);
-            var protectedSecret = await ProtectAsync(connection, transaction, secret, cancellationToken).ConfigureAwait(false);
-            var environmentVariable = SshCredentialReference.BuildEnvironmentVariableName(key);
-            var createdUtc = existing?.CreatedUtc ?? now;
-            var effectiveDescription = string.IsNullOrWhiteSpace(description) ? existing?.Description : description.Trim();
+        var key = NormalizeName(name);
+        var now = DateTimeOffset.UtcNow;
+        var existing = await LoadEntryForUpdateAsync(connection, transaction, key, cancellationToken).ConfigureAwait(false);
+        var protectedSecret = await ProtectAsync(connection, transaction, databasePath, secret, cancellationToken).ConfigureAwait(false);
+        var environmentVariable = SshCredentialReference.BuildEnvironmentVariableName(key);
+        var createdUtc = existing?.CreatedUtc ?? now;
+        var effectiveDescription = string.IsNullOrWhiteSpace(description) ? existing?.Description : description.Trim();
 
-            await ExecuteNonQueryAsync(connection, transaction, """
-                INSERT INTO ssh_credentials (
-                    name,
-                    environment_variable,
-                    description,
-                    algorithm,
-                    nonce,
-                    tag,
-                    ciphertext,
-                    created_at_utc,
-                    updated_at_utc)
-                VALUES (
-                    $name,
-                    $environmentVariable,
-                    $description,
-                    $algorithm,
-                    $nonce,
-                    $tag,
-                    $ciphertext,
-                    $createdAtUtc,
-                    $updatedAtUtc)
-                ON CONFLICT(name) DO UPDATE SET
-                    environment_variable = excluded.environment_variable,
-                    description = excluded.description,
-                    algorithm = excluded.algorithm,
-                    nonce = excluded.nonce,
-                    tag = excluded.tag,
-                    ciphertext = excluded.ciphertext,
-                    updated_at_utc = excluded.updated_at_utc;
-                """, cancellationToken,
-                new SqliteParameterValue("$name", key),
-                new SqliteParameterValue("$environmentVariable", environmentVariable),
-                new SqliteParameterValue("$description", effectiveDescription),
-                new SqliteParameterValue("$algorithm", protectedSecret.Algorithm),
-                new SqliteParameterValue("$nonce", protectedSecret.Nonce),
-                new SqliteParameterValue("$tag", protectedSecret.Tag),
-                new SqliteParameterValue("$ciphertext", protectedSecret.Ciphertext),
-                new SqliteParameterValue("$createdAtUtc", createdUtc.ToString("O")),
-                new SqliteParameterValue("$updatedAtUtc", now.ToString("O"))).ConfigureAwait(false);
+        await ExecuteNonQueryAsync(connection, transaction, """
+            INSERT INTO ssh_credentials (
+                name,
+                environment_variable,
+                description,
+                algorithm,
+                nonce,
+                tag,
+                ciphertext,
+                created_at_utc,
+                updated_at_utc)
+            VALUES (
+                $name,
+                $environmentVariable,
+                $description,
+                $algorithm,
+                $nonce,
+                $tag,
+                $ciphertext,
+                $createdAtUtc,
+                $updatedAtUtc)
+            ON CONFLICT(name) DO UPDATE SET
+                environment_variable = excluded.environment_variable,
+                description = excluded.description,
+                algorithm = excluded.algorithm,
+                nonce = excluded.nonce,
+                tag = excluded.tag,
+                ciphertext = excluded.ciphertext,
+                updated_at_utc = excluded.updated_at_utc;
+            """, cancellationToken,
+            new SqliteParameterValue("$name", key),
+            new SqliteParameterValue("$environmentVariable", environmentVariable),
+            new SqliteParameterValue("$description", effectiveDescription),
+            new SqliteParameterValue("$algorithm", protectedSecret.Algorithm),
+            new SqliteParameterValue("$nonce", protectedSecret.Nonce),
+            new SqliteParameterValue("$tag", protectedSecret.Tag),
+            new SqliteParameterValue("$ciphertext", protectedSecret.Ciphertext),
+            new SqliteParameterValue("$createdAtUtc", createdUtc.ToString("O")),
+            new SqliteParameterValue("$updatedAtUtc", now.ToString("O"))).ConfigureAwait(false);
 
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            return new SshCredentialVaultEntry(key, environmentVariable, effectiveDescription, createdUtc, now);
-        }
-        finally
-        {
-            gate.Release();
-        }
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return new SshCredentialVaultEntry(key, environmentVariable, effectiveDescription, createdUtc, now);
     }
 
     public async ValueTask<bool> DeleteEntryAsync(string name, CancellationToken cancellationToken)
     {
         var databasePath = ResolveDatabasePath();
-        var gate = Locks.GetOrAdd(databasePath, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
-            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-            var affected = await ExecuteNonQueryAsync(connection, transaction,
-                "DELETE FROM ssh_credentials WHERE name = $name;",
-                cancellationToken,
-                new SqliteParameterValue("$name", NormalizeName(name))).ConfigureAwait(false);
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            return affected > 0;
-        }
-        finally
-        {
-            gate.Release();
-        }
+        await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var affected = await ExecuteNonQueryAsync(connection, transaction,
+            "DELETE FROM ssh_credentials WHERE name = $name;",
+            cancellationToken,
+            new SqliteParameterValue("$name", NormalizeName(name))).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return affected > 0;
     }
 
     public async ValueTask<string?> ResolveSecretAsync(string credentialReference, CancellationToken cancellationToken)
@@ -171,27 +145,18 @@ public sealed class SqliteSshCredentialVault : ISshCredentialVault
         }
 
         var databasePath = ResolveDatabasePath();
-        var gate = Locks.GetOrAdd(databasePath, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var row = await LoadSecretByReferenceAsync(connection, transaction, reference, cancellationToken).ConfigureAwait(false);
+        if (row is not { } secretRow)
         {
-            await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
-            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-            var row = await LoadSecretByReferenceAsync(connection, transaction, reference, cancellationToken).ConfigureAwait(false);
-            if (row is not { } secretRow)
-            {
-                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-                return null;
-            }
-
-            var secret = await UnprotectAsync(connection, transaction, secretRow, cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            return secret;
+            return null;
         }
-        finally
-        {
-            gate.Release();
-        }
+
+        var secret = await UnprotectAsync(connection, transaction, databasePath, secretRow, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return secret;
     }
 
     public async ValueTask<bool> HasSecretAsync(string credentialReference, CancellationToken cancellationToken)
@@ -204,14 +169,35 @@ public sealed class SqliteSshCredentialVault : ISshCredentialVault
     {
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath) ?? AppContext.BaseDirectory);
         var connection = new SqliteConnection(BuildConnectionString(databasePath));
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await EnsureSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
-        return connection;
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await ConfigureConnectionAsync(connection, cancellationToken).ConfigureAwait(false);
+            await SqliteSshDatabaseInitializationCoordinator.EnsureInitializedAsync(
+                databasePath,
+                SchemaName,
+                connection,
+                InitializeSchemaAsync,
+                cancellationToken).ConfigureAwait(false);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
-    private static async ValueTask EnsureSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    private static async ValueTask ConfigureConnectionAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         await ExecuteNonQueryAsync(connection, null, "PRAGMA foreign_keys = ON;", cancellationToken).ConfigureAwait(false);
+        await ExecuteNonQueryAsync(connection, null, "PRAGMA busy_timeout = 5000;", cancellationToken).ConfigureAwait(false);
+        await ExecuteNonQueryAsync(connection, null, "PRAGMA synchronous = NORMAL;", cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask InitializeSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await ExecuteScalarAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken).ConfigureAwait(false);
 
         await ExecuteNonQueryAsync(connection, null, """
             CREATE TABLE IF NOT EXISTS ssh_vault_master_keys (
@@ -306,10 +292,11 @@ public sealed class SqliteSshCredentialVault : ISshCredentialVault
     private async ValueTask<SshCredentialSecret> ProtectAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
+        string databasePath,
         string secret,
         CancellationToken cancellationToken)
     {
-        var masterKey = await LoadOrCreateMasterKeyAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        var masterKey = await LoadOrCreateMasterKeyAsync(connection, transaction, databasePath, cancellationToken).ConfigureAwait(false);
         var nonce = RandomNumberGenerator.GetBytes(NonceLengthBytes);
         var plaintext = Encoding.UTF8.GetBytes(secret);
         var ciphertext = new byte[plaintext.Length];
@@ -340,6 +327,7 @@ public sealed class SqliteSshCredentialVault : ISshCredentialVault
     private async ValueTask<string> UnprotectAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
+        string databasePath,
         SecretRow secret,
         CancellationToken cancellationToken)
     {
@@ -348,7 +336,7 @@ public sealed class SqliteSshCredentialVault : ISshCredentialVault
             throw new InvalidOperationException($"Unsupported SSH credential algorithm '{secret.Algorithm}'. Expected '{AlgorithmName}'.");
         }
 
-        var masterKey = await LoadOrCreateMasterKeyAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        var masterKey = await LoadOrCreateMasterKeyAsync(connection, transaction, databasePath, cancellationToken).ConfigureAwait(false);
         var nonce = Convert.FromBase64String(secret.Nonce);
         var tag = Convert.FromBase64String(secret.Tag);
         var ciphertext = Convert.FromBase64String(secret.Ciphertext);
@@ -373,50 +361,90 @@ public sealed class SqliteSshCredentialVault : ISshCredentialVault
     private static async ValueTask<byte[]> LoadOrCreateMasterKeyAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
+        string databasePath,
         CancellationToken cancellationToken)
     {
-        await using (var command = connection.CreateCommand())
+        var existing = await LoadMasterKeyAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        if (existing is not null)
         {
-            command.Transaction = transaction;
-            command.CommandText = """
-                SELECT master_key
-                FROM ssh_vault_master_keys
-                WHERE name = $name;
-                """;
-            command.Parameters.AddWithValue("$name", MasterKeyName);
-            var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-            if (value is string encoded && !string.IsNullOrWhiteSpace(encoded))
-            {
-                return Convert.FromBase64String(encoded);
-            }
+            return existing;
         }
 
-        var masterKey = RandomNumberGenerator.GetBytes(MasterKeyLengthBytes);
-        var now = DateTimeOffset.UtcNow.ToString("O");
-        await ExecuteNonQueryAsync(connection, transaction, """
-            INSERT INTO ssh_vault_master_keys (
-                name,
-                version,
-                algorithm,
-                master_key,
-                created_at_utc,
-                updated_at_utc)
-            VALUES (
-                $name,
-                $version,
-                $algorithm,
-                $masterKey,
-                $createdAtUtc,
-                $updatedAtUtc);
-            """, cancellationToken,
-            new SqliteParameterValue("$name", MasterKeyName),
-            new SqliteParameterValue("$version", SchemaVersion),
-            new SqliteParameterValue("$algorithm", AlgorithmName),
-            new SqliteParameterValue("$masterKey", Convert.ToBase64String(masterKey)),
-            new SqliteParameterValue("$createdAtUtc", now),
-            new SqliteParameterValue("$updatedAtUtc", now)).ConfigureAwait(false);
+        var gate = MasterKeyLocks.GetOrAdd(databasePath, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            existing = await LoadMasterKeyAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+            if (existing is not null)
+            {
+                return existing;
+            }
 
-        return masterKey;
+            var masterKey = RandomNumberGenerator.GetBytes(MasterKeyLengthBytes);
+            var now = DateTimeOffset.UtcNow.ToString("O");
+            var inserted = await ExecuteNonQueryAsync(connection, transaction, """
+                INSERT INTO ssh_vault_master_keys (
+                    name,
+                    version,
+                    algorithm,
+                    master_key,
+                    created_at_utc,
+                    updated_at_utc)
+                VALUES (
+                    $name,
+                    $version,
+                    $algorithm,
+                    $masterKey,
+                    $createdAtUtc,
+                    $updatedAtUtc)
+                ON CONFLICT(name) DO NOTHING;
+                """, cancellationToken,
+                new SqliteParameterValue("$name", MasterKeyName),
+                new SqliteParameterValue("$version", SchemaVersion),
+                new SqliteParameterValue("$algorithm", AlgorithmName),
+                new SqliteParameterValue("$masterKey", Convert.ToBase64String(masterKey)),
+                new SqliteParameterValue("$createdAtUtc", now),
+                new SqliteParameterValue("$updatedAtUtc", now)).ConfigureAwait(false);
+
+            if (inserted == 0)
+            {
+                var reloaded = await LoadMasterKeyAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+                if (reloaded is not null)
+                {
+                    CryptographicOperations.ZeroMemory(masterKey);
+                    return reloaded;
+                }
+
+                CryptographicOperations.ZeroMemory(masterKey);
+                throw new InvalidOperationException("Failed to initialize the SSH vault master key.");
+            }
+
+            return masterKey;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private static async ValueTask<byte[]?> LoadMasterKeyAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT master_key
+            FROM ssh_vault_master_keys
+            WHERE name = $name;
+            """;
+        command.Parameters.AddWithValue("$name", MasterKeyName);
+
+        var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return value is string encoded && !string.IsNullOrWhiteSpace(encoded)
+            ? Convert.FromBase64String(encoded)
+            : null;
     }
 
     private string ResolveDatabasePath()
@@ -432,8 +460,10 @@ public sealed class SqliteSshCredentialVault : ISshCredentialVault
         var builder = new SqliteConnectionStringBuilder
         {
             DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Default,
-            Pooling = false
+            Pooling = true,
+            DefaultTimeout = 30
         };
 
         return builder.ToString();
@@ -456,6 +486,16 @@ public sealed class SqliteSshCredentialVault : ISshCredentialVault
         }
 
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<object?> ExecuteScalarAsync(
+        SqliteConnection connection,
+        string commandText,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = commandText;
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static string NormalizeName(string name)

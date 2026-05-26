@@ -3,6 +3,7 @@ using System.Text.Json;
 using Autofac;
 using Autofac.Features.Indexed;
 using MCPServer.Application;
+using MCPServer.Application.Mcp;
 using MCPServer.Application.Mcp.Interfaces;
 using MCPServer.Application.Mcp.JsonRpc.Interfaces;
 using MCPServer.Domain.Mcp;
@@ -19,9 +20,10 @@ public sealed class McpCapabilityHonestyTests
     public async Task Advertised_Capabilities_Have_Registered_Method_Handlers()
     {
         using var container = BuildContainer();
-        var parser = container.Resolve<IJsonRpcMessageParser>();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
-        var handlers = container.Resolve<IIndex<string, IMcpMethodHandler>>();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
+        var parser = sessionScope.Resolve<IJsonRpcMessageParser>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
+        var handlers = sessionScope.Resolve<IIndex<string, IMcpMethodHandler>>();
 
         var initialize = TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}
@@ -53,8 +55,9 @@ public sealed class McpCapabilityHonestyTests
     public async Task Advertised_ListChanged_Flags_Are_Not_Set_Without_Notification_Emitters()
     {
         using var container = BuildContainer();
-        var parser = container.Resolve<IJsonRpcMessageParser>();
-        var dispatcher = container.Resolve<IMcpRequestDispatcher>();
+        using var sessionScope = container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
+        var parser = sessionScope.Resolve<IJsonRpcMessageParser>();
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
 
         var initialize = TestFin.Success(parser.Parse(Encoding.UTF8.GetBytes("""
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}

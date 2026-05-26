@@ -1,3 +1,4 @@
+using Autofac;
 using LanguageExt.Common;
 using MCPServer.Application.Mcp.Interfaces;
 using MCPServer.Application.Mcp.JsonRpc.Interfaces;
@@ -10,34 +11,23 @@ namespace MCPServer.Infrastructure.Mcp.Stdio;
 
 public sealed class StdioMcpServerService : BackgroundService
 {
-    private readonly IMcpRequestDispatcher _dispatcher;
-    private readonly IJsonRpcMessageParser _parser;
-    private readonly IJsonRpcResponseSerializer _serializer;
+    private readonly ILifetimeScope _lifetimeScope;
     private readonly StdioMcpTransportOptions _options;
     private readonly ILogger<StdioMcpServerService> _logger;
-    private readonly IStdioMcpClientFeatureTransport _clientFeatureTransport;
+    private readonly SemaphoreSlim _outputWriteLock = new SemaphoreSlim(1, 1);
 
     public StdioMcpServerService(
-        IMcpRequestDispatcher dispatcher,
-        IJsonRpcMessageParser parser,
-        IJsonRpcResponseSerializer serializer,
+        ILifetimeScope lifetimeScope,
         StdioMcpTransportOptions options,
-        ILogger<StdioMcpServerService> logger,
-        IStdioMcpClientFeatureTransport clientFeatureTransport)
+        ILogger<StdioMcpServerService> logger)
     {
-        ArgumentNullException.ThrowIfNull(dispatcher);
-        ArgumentNullException.ThrowIfNull(parser);
-        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(lifetimeScope);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
-        ArgumentNullException.ThrowIfNull(clientFeatureTransport);
 
-        _dispatcher = dispatcher;
-        _parser = parser;
-        _serializer = serializer;
+        _lifetimeScope = lifetimeScope;
         _options = options;
         _logger = logger;
-        _clientFeatureTransport = clientFeatureTransport;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -50,116 +40,200 @@ public sealed class StdioMcpServerService : BackgroundService
 
         _logger.LogInformation("MCP stdio transport started");
 
+        using var sessionScope = _lifetimeScope.BeginLifetimeScope(McpLifetimeScopeTags.Session);
+        var dispatcher = sessionScope.Resolve<IMcpRequestDispatcher>();
+        var parser = sessionScope.Resolve<IJsonRpcMessageParser>();
+        var serializer = sessionScope.Resolve<IJsonRpcResponseSerializer>();
+        var clientFeatureTransport = sessionScope.Resolve<IStdioMcpClientFeatureTransport>();
+
         await using var session = StdioMcpTransportSession.Open(_options);
-        _clientFeatureTransport.Attach(session.Output, _serializer);
+        clientFeatureTransport.Attach(session.Output, serializer, _outputWriteLock);
 
-        while (!stoppingToken.IsCancellationRequested)
+        var activeRequestTasks = new List<Task>();
+        using var transportCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+
+        try
         {
-            var readResult = await session.ReadFrameAsync(_options.MaxInputFrameBytes, stoppingToken).ConfigureAwait(false);
-            if (readResult.IsEndOfInput)
+            while (!stoppingToken.IsCancellationRequested)
             {
-                _logger.LogInformation("MCP stdin closed; stopping stdio transport");
-                break;
-            }
+                var readResult = await session.ReadFrameAsync(_options.MaxInputFrameBytes, transportCts.Token).ConfigureAwait(false);
+                if (readResult.IsEndOfInput)
+                {
+                    _logger.LogInformation("MCP stdin closed; stopping stdio transport");
+                    break;
+                }
 
-            JsonRpcDispatchResult dispatch;
-            if (readResult.IsInvalidFrame)
-            {
-                dispatch = JsonRpcDispatchResult.Respond(JsonRpcResponse.Failure(
-                    JsonRpcRequestId.Missing,
-                    JsonRpcErrorCodes.ParseError,
-                    "MCP stdio messages must be newline-delimited and must not contain embedded newlines."));
-            }
-            else if (readResult.IsTooLarge)
-            {
-                dispatch = JsonRpcDispatchResult.Respond(JsonRpcResponse.Failure(
-                    JsonRpcRequestId.Missing,
-                    JsonRpcErrorCodes.InvalidRequest,
-                    "JSON-RPC message exceeded the configured maximum input size."));
-            }
-            else if (readResult.Frame is { } frame)
-            {
+                if (readResult.IsInvalidFrame)
+                {
+                    activeRequestTasks.Add(WriteParseErrorAsync(
+                        session.Output,
+                        serializer,
+                        JsonRpcErrorCodes.ParseError,
+                        "MCP stdio messages must be newline-delimited and must not contain embedded newlines.",
+                        transportCts.Token));
+                    continue;
+                }
+
+                if (readResult.IsTooLarge)
+                {
+                    activeRequestTasks.Add(WriteParseErrorAsync(
+                        session.Output,
+                        serializer,
+                        JsonRpcErrorCodes.InvalidRequest,
+                        "JSON-RPC message exceeded the configured maximum input size.",
+                        transportCts.Token));
+                    continue;
+                }
+
+                if (readResult.Frame is not { } frame)
+                {
+                    continue;
+                }
+
                 using (frame)
                 {
                     if (frame.Length == 0)
                     {
-                        dispatch = JsonRpcDispatchResult.Respond(JsonRpcResponse.Failure(
-                            JsonRpcRequestId.Missing,
+                        activeRequestTasks.Add(WriteParseErrorAsync(
+                            session.Output,
+                            serializer,
                             JsonRpcErrorCodes.ParseError,
-                            "MCP stdio frame was empty."));
+                            "MCP stdio frame was empty.",
+                            transportCts.Token));
+                        continue;
                     }
-                    else
-                    {
-                        dispatch = await ProcessFrameAsync(frame.Memory, stoppingToken).ConfigureAwait(false);
-                    }
+
+                    var frameBytes = frame.Memory.ToArray();
+                    activeRequestTasks.Add(HandleFrameAsync(frameBytes, session.Output, parser, dispatcher, clientFeatureTransport, serializer, transportCts.Token));
                 }
             }
-            else
-            {
-                continue;
-            }
+        }
+        finally
+        {
+            transportCts.Cancel();
 
-            if (!dispatch.HasResponse)
+            try
             {
-                continue;
+                if (activeRequestTasks.Count > 0)
+                {
+                    await Task.WhenAll(activeRequestTasks).ConfigureAwait(false);
+                }
             }
-
-            await _serializer.WriteAsync(session.Output, dispatch.Response, stoppingToken).ConfigureAwait(false);
+            catch (OperationCanceledException) when (transportCts.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "One or more MCP stdio request handlers failed during shutdown.");
+            }
         }
     }
 
-    private async ValueTask<JsonRpcDispatchResult> ProcessFrameAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken)
+    private async Task HandleFrameAsync(
+        ReadOnlyMemory<byte> frame,
+        Stream output,
+        IJsonRpcMessageParser parser,
+        IMcpRequestDispatcher dispatcher,
+        IStdioMcpClientFeatureTransport clientFeatureTransport,
+        IJsonRpcResponseSerializer serializer,
+        CancellationToken cancellationToken)
     {
-        var parsed = _parser.Parse(frame);
-        var parseOutcome = parsed.Match(
-            Succ: static message => ParseOutcome.Success(message),
-            Fail: static error => ParseOutcome.Fail(error));
-
-        if (parseOutcome is not { IsSuccess: true })
-        {
-            var parseErrorMessage = parseOutcome.Error is { } parseError
-                ? parseError.Message
-                : "Parse error.";
-            _logger.LogWarning("Failed to parse JSON-RPC message: {ErrorMessage}", parseErrorMessage);
-            return JsonRpcDispatchResult.Respond(JsonRpcResponse.Failure(JsonRpcRequestId.Missing, JsonRpcErrorCodes.ParseError, "Parse error."));
-        }
-
         try
         {
+            var parsed = parser.Parse(frame);
+            var parseOutcome = parsed.Match(
+                Succ: static message => ParseOutcome.Success(message),
+                Fail: static error => ParseOutcome.Fail(error));
+
+            if (parseOutcome is not { IsSuccess: true })
+            {
+                var parseErrorMessage = parseOutcome.Error is { } parseError
+                    ? parseError.Message
+                    : "Parse error.";
+                _logger.LogWarning("Failed to parse JSON-RPC message: {ErrorMessage}", parseErrorMessage);
+                await WriteResponseAsync(
+                    output,
+                    serializer,
+                    JsonRpcResponse.Failure(
+                        JsonRpcRequestId.Missing,
+                        JsonRpcErrorCodes.ParseError,
+                        "Parse error."),
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             if (parseOutcome.Message.IsResponse)
             {
-                if (!_clientFeatureTransport.TryHandleResponse(parseOutcome.Message))
+                if (!clientFeatureTransport.TryHandleResponse(parseOutcome.Message))
                 {
                     _logger.LogWarning("Ignoring unmatched outbound MCP response from client.");
                 }
-
-                return JsonRpcDispatchResult.NoResponse;
+                return;
             }
 
-            var dispatched = await _dispatcher.DispatchAsync(parseOutcome.Message, cancellationToken).ConfigureAwait(false);
+            var dispatched = await dispatcher.DispatchAsync(parseOutcome.Message, cancellationToken).ConfigureAwait(false);
             var dispatchOutcome = dispatched.Match(
                 Succ: static result => DispatchOutcome.Success(result),
                 Fail: static error => DispatchOutcome.Fail(error));
 
             if (dispatchOutcome.IsSuccess)
             {
-                return dispatchOutcome.Result;
+                if (dispatchOutcome.Result.HasResponse)
+                {
+                    await WriteResponseAsync(output, serializer, dispatchOutcome.Result.Response, cancellationToken).ConfigureAwait(false);
+                }
+
+                return;
             }
 
             var dispatchErrorMessage = dispatchOutcome.Error is { } dispatchError
                 ? dispatchError.Message
                 : "Internal MCP server error.";
             _logger.LogError("Failed to dispatch JSON-RPC message: {ErrorMessage}", dispatchErrorMessage);
-            return JsonRpcDispatchResult.Respond(JsonRpcResponse.Failure(JsonRpcRequestId.Missing, JsonRpcErrorCodes.InternalError, "Internal MCP server error."));
+            await WriteResponseAsync(
+                output,
+                serializer,
+                JsonRpcResponse.Failure(JsonRpcRequestId.Missing, JsonRpcErrorCodes.InternalError, "Internal MCP server error."),
+                cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to process JSON-RPC message");
-            return JsonRpcDispatchResult.Respond(JsonRpcResponse.Failure(JsonRpcRequestId.Missing, JsonRpcErrorCodes.InternalError, "Internal MCP server error."));
+        }
+    }
+
+    private async Task WriteParseErrorAsync(Stream output, IJsonRpcResponseSerializer serializer, int errorCode, string message, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await WriteResponseAsync(
+                output,
+                serializer,
+                JsonRpcResponse.Failure(JsonRpcRequestId.Missing, errorCode, message),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to write MCP stdio parse error response.");
+        }
+    }
+
+    private async ValueTask WriteResponseAsync(Stream output, IJsonRpcResponseSerializer serializer, JsonRpcResponse response, CancellationToken cancellationToken)
+    {
+        await _outputWriteLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await serializer.WriteAsync(output, response, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _outputWriteLock.Release();
         }
     }
 

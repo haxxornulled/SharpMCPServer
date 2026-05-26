@@ -12,10 +12,10 @@ namespace MCPServer.Infrastructure.Mcp.Stdio;
 public sealed class StdioMcpClientFeatureTransport : IMcpClientFeatureInvoker, IMcpTaskStatusNotifier, IStdioMcpClientFeatureTransport
 {
     private readonly IMcpSessionState _sessionState;
-    private readonly SemaphoreSlim _writeLock = new SemaphoreSlim(1, 1);
     private readonly ConcurrentDictionary<int, TaskCompletionSource<Fin<JsonElement>>> _pendingResponses = new();
     private Stream? _output;
     private IJsonRpcResponseSerializer? _serializer;
+    private SemaphoreSlim? _writeLock;
     private int _nextRequestId;
 
     public StdioMcpClientFeatureTransport(IMcpSessionState sessionState)
@@ -23,12 +23,14 @@ public sealed class StdioMcpClientFeatureTransport : IMcpClientFeatureInvoker, I
         _sessionState = sessionState ?? throw new ArgumentNullException(nameof(sessionState));
     }
 
-    public void Attach(Stream output, IJsonRpcResponseSerializer serializer)
+    public void Attach(Stream output, IJsonRpcResponseSerializer serializer, SemaphoreSlim writeLock)
     {
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(writeLock);
         _output = output;
         _serializer = serializer;
+        _writeLock = writeLock;
     }
 
     public bool TryHandleResponse(JsonRpcMessage message)
@@ -130,7 +132,7 @@ public sealed class StdioMcpClientFeatureTransport : IMcpClientFeatureInvoker, I
     {
         ArgumentNullException.ThrowIfNull(taskStatus);
 
-        if (!_sessionState.ClientCapabilities.SupportsTasks || _output is null || _serializer is null)
+        if (!_sessionState.ClientCapabilities.SupportsTasks || _output is null || _serializer is null || _writeLock is null)
         {
             return;
         }
@@ -144,13 +146,14 @@ public sealed class StdioMcpClientFeatureTransport : IMcpClientFeatureInvoker, I
         {
             var output = _output;
             var serializer = _serializer;
-            if (output is null || serializer is null)
+            var writeLock = _writeLock;
+            if (output is null || serializer is null || writeLock is null)
             {
                 return;
             }
 
             var payload = JsonSerializer.SerializeToElement(taskStatus, McpJsonSerializerContext.Default.TaskStatusNotificationParams);
-            await _writeLock.WaitAsync().ConfigureAwait(false);
+            await writeLock.WaitAsync().ConfigureAwait(false);
             try
             {
                 await serializer.WriteNotificationAsync(output, McpMethods.NotificationsTasksStatus, payload, CancellationToken.None).ConfigureAwait(false);
@@ -160,7 +163,7 @@ public sealed class StdioMcpClientFeatureTransport : IMcpClientFeatureInvoker, I
             }
             finally
             {
-                _writeLock.Release();
+                writeLock.Release();
             }
         }
         catch
@@ -172,7 +175,8 @@ public sealed class StdioMcpClientFeatureTransport : IMcpClientFeatureInvoker, I
     {
         var output = _output;
         var serializer = _serializer;
-        if (output is null || serializer is null)
+        var writeLock = _writeLock;
+        if (output is null || serializer is null || writeLock is null)
         {
             return Fin.Fail<JsonElement>(Error.New("No active stdio MCP client connection is available for outbound client feature requests."));
         }
@@ -183,7 +187,7 @@ public sealed class StdioMcpClientFeatureTransport : IMcpClientFeatureInvoker, I
 
         try
         {
-            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 await serializer.WriteRequestAsync(output, id, method, payload, cancellationToken).ConfigureAwait(false);
@@ -200,7 +204,7 @@ public sealed class StdioMcpClientFeatureTransport : IMcpClientFeatureInvoker, I
             }
             finally
             {
-                _writeLock.Release();
+                writeLock.Release();
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

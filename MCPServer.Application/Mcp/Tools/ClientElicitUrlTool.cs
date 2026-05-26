@@ -9,11 +9,11 @@ public sealed class ClientElicitUrlTool : IMcpTool
 {
     private static readonly JsonElement InputSchema = CreateInputSchema();
     private static readonly JsonElement OutputSchema = CreateOutputSchema();
-    private readonly IMcpClientFeatureInvoker _clientFeatures;
+    private readonly Func<IMcpClientFeatureInvoker> _clientFeaturesFactory;
 
-    public ClientElicitUrlTool(IMcpClientFeatureInvoker clientFeatures)
+    public ClientElicitUrlTool(Func<IMcpClientFeatureInvoker> clientFeaturesFactory)
     {
-        _clientFeatures = clientFeatures ?? throw new ArgumentNullException(nameof(clientFeatures));
+        _clientFeaturesFactory = clientFeaturesFactory ?? throw new ArgumentNullException(nameof(clientFeaturesFactory));
     }
 
     public McpToolDescriptor Descriptor { get; } = new McpToolDescriptor
@@ -59,7 +59,7 @@ public sealed class ClientElicitUrlTool : IMcpTool
             Url = urlElement.GetString() ?? string.Empty
         };
 
-        var response = await _clientFeatures.ElicitUrlAsync(request, cancellationToken).ConfigureAwait(false);
+        var response = await _clientFeaturesFactory().ElicitUrlAsync(request, cancellationToken).ConfigureAwait(false);
         return response.Match(
             Succ: payload => Fin.Succ<ToolCallResult>(ToolCallResult.Text(payload.GetRawText(), structuredContent: payload)),
             Fail: error => Fin.Succ<ToolCallResult>(ToolCallResult.Text(error.Message, isError: true)));

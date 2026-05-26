@@ -18,33 +18,25 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
     private const string TextEventStreamContentType = "text/event-stream";
     private const string AllowHeaderValue = "POST";
 
-    private readonly IMcpRequestDispatcher _dispatcher;
     private readonly IJsonRpcMessageParser _parser;
     private readonly IJsonRpcResponseSerializer _serializer;
-    private readonly IMcpToolRegistry _toolRegistry;
-    private readonly IStreamableHttpMcpSessionTransport _sessionTransport;
+    private readonly IStreamableHttpMcpSessionManager _sessionManager;
     private readonly ILogger<StreamableHttpMcpRequestProcessor> _logger;
 
     public StreamableHttpMcpRequestProcessor(
-        IMcpRequestDispatcher dispatcher,
         IJsonRpcMessageParser parser,
         IJsonRpcResponseSerializer serializer,
-        IMcpToolRegistry toolRegistry,
-        IStreamableHttpMcpSessionTransport sessionTransport,
+        IStreamableHttpMcpSessionManager sessionManager,
         ILogger<StreamableHttpMcpRequestProcessor> logger)
     {
-        ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(parser);
         ArgumentNullException.ThrowIfNull(serializer);
-        ArgumentNullException.ThrowIfNull(toolRegistry);
-        ArgumentNullException.ThrowIfNull(sessionTransport);
+        ArgumentNullException.ThrowIfNull(sessionManager);
         ArgumentNullException.ThrowIfNull(logger);
 
-        _dispatcher = dispatcher;
         _parser = parser;
         _serializer = serializer;
-        _toolRegistry = toolRegistry;
-        _sessionTransport = sessionTransport;
+        _sessionManager = sessionManager;
         _logger = logger;
     }
 
@@ -89,7 +81,7 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
         var message = parseOutcome.Message;
         var isInitialize = string.Equals(message.Method, McpMethods.Initialize, StringComparison.Ordinal);
 
-        if (!_sessionTransport.TryValidateSessionRequest(request, isInitialize, out var sessionStatusCode, out var sessionError))
+        if (!_sessionManager.TryValidateSessionRequest(request, isInitialize, out var session, out var sessionStatusCode, out var sessionError))
         {
             return ErrorResponse(
                 sessionStatusCode,
@@ -105,7 +97,7 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
 
         if (message.IsResponse)
         {
-            if (!_sessionTransport.TryHandleResponse(message))
+            if (session is not null && !session.Transport.TryHandleResponse(message))
             {
                 _logger.LogWarning("Received an unmatched outbound MCP response over Streamable HTTP.");
             }
@@ -113,7 +105,7 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
             return Accepted();
         }
 
-        if (!TryValidateMessageHeaders(request, message, out var messageHeaderError))
+        if (!TryValidateMessageHeaders(request, message, session?.ToolRegistry, out var messageHeaderError))
         {
             return BadRequest(message.HasId ? message.Id : JsonRpcRequestId.Missing, messageHeaderError, GetErrorCodeForValidation(message));
         }
@@ -122,10 +114,29 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
         {
             if (isInitialize)
             {
-                _sessionTransport.StartSession();
+                var createdSessionResult = _sessionManager.CreateSession();
+                var createdSessionOutcome = createdSessionResult.Match(
+                    Succ: static sessionContext => SessionCreationOutcome.Success(sessionContext),
+                    Fail: static error => SessionCreationOutcome.Fail(error));
+
+                if (createdSessionOutcome is not { IsSuccess: true, Session: { } createdSession })
+                {
+                    var messageText = createdSessionOutcome.Error is { } creationError
+                        ? creationError.Message
+                        : "Failed to create MCP HTTP session.";
+                    _logger.LogError("Failed to create MCP HTTP session: {ErrorMessage}", messageText);
+                    return InternalServerError(message.HasId ? message.Id : JsonRpcRequestId.Missing, messageText);
+                }
+
+                session = createdSession;
             }
 
-            var dispatched = await _dispatcher.DispatchAsync(message, cancellationToken).ConfigureAwait(false);
+            if (session is null)
+            {
+                return InternalServerError(message.HasId ? message.Id : JsonRpcRequestId.Missing, "MCP HTTP session is unavailable.");
+            }
+
+            var dispatched = await session.Dispatcher.DispatchAsync(message, cancellationToken).ConfigureAwait(false);
             var dispatchOutcome = dispatched.Match(
                 Succ: static result => DispatchOutcome.Success(result),
                 Fail: static error => DispatchOutcome.Fail(error));
@@ -139,7 +150,10 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
 
                 if (isInitialize)
                 {
-                    _sessionTransport.TerminateSession();
+                    if (!_sessionManager.TryTerminateSession(session.SessionId))
+                    {
+                        session.Dispose();
+                    }
                 }
 
                 return InternalServerError(message.HasId ? message.Id : JsonRpcRequestId.Missing, messageText);
@@ -151,7 +165,7 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
             }
 
             var response = await SerializeJsonRpcResponseAsync(dispatchOutcome.Result.Response, HttpStatusCode.OK, cancellationToken).ConfigureAwait(false);
-            if (isInitialize && _sessionTransport.SessionId is { } sessionId)
+            if (isInitialize && session.SessionId is { Length: > 0 } sessionId)
             {
                 response.Headers[StreamableHttpMcpHeaderNames.SessionId] = sessionId;
             }
@@ -164,9 +178,12 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
         }
         catch (Exception ex)
         {
-            if (isInitialize)
+            if (isInitialize && session is not null)
             {
-                _sessionTransport.TerminateSession();
+                if (!_sessionManager.TryTerminateSession(session.SessionId))
+                {
+                    session.Dispose();
+                }
             }
 
             _logger.LogError(ex, "Unhandled exception while processing MCP HTTP message");
@@ -247,7 +264,7 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
         };
     }
 
-    private bool TryValidateOrigin(StreamableHttpMcpRequest request, out string error)
+    private static bool TryValidateOrigin(StreamableHttpMcpRequest request, out string error)
     {
         var originHeader = request.GetHeader(StreamableHttpMcpHeaderNames.Origin);
         if (string.IsNullOrWhiteSpace(originHeader))
@@ -269,7 +286,7 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
         return true;
     }
 
-    private bool TryValidateRequestHeaders(StreamableHttpMcpRequest request, out string error)
+    private static bool TryValidateRequestHeaders(StreamableHttpMcpRequest request, out string error)
     {
         if (!HasMediaType(request.GetHeader(StreamableHttpMcpHeaderNames.Accept), JsonContentType) ||
             !HasMediaType(request.GetHeader(StreamableHttpMcpHeaderNames.Accept), TextEventStreamContentType))
@@ -288,7 +305,7 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
         return true;
     }
 
-    private bool TryValidateProtocolVersion(StreamableHttpMcpRequest request, bool isInitialize, out string error)
+    private static bool TryValidateProtocolVersion(StreamableHttpMcpRequest request, bool isInitialize, out string error)
     {
         var protocolVersion = request.GetHeader(StreamableHttpMcpHeaderNames.ProtocolVersion);
         if (string.IsNullOrWhiteSpace(protocolVersion))
@@ -313,7 +330,7 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
         return true;
     }
 
-    private bool TryValidateMessageHeaders(StreamableHttpMcpRequest request, JsonRpcMessage message, out string error)
+    private static bool TryValidateMessageHeaders(StreamableHttpMcpRequest request, JsonRpcMessage message, IMcpToolRegistry? toolRegistry, out string error)
     {
         error = string.Empty;
 
@@ -335,7 +352,7 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
 
         if (message.Method is McpMethods.ToolsCall)
         {
-            return TryValidateToolHeaders(request, message, out error);
+            return TryValidateToolHeaders(request, message, toolRegistry, out error);
         }
 
         if (message.Method is McpMethods.ToolsCall or McpMethods.ResourcesRead or McpMethods.PromptsGet)
@@ -349,7 +366,7 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
         return true;
     }
 
-    private bool TryValidateToolHeaders(StreamableHttpMcpRequest request, JsonRpcMessage message, out string error)
+    private static bool TryValidateToolHeaders(StreamableHttpMcpRequest request, JsonRpcMessage message, IMcpToolRegistry? toolRegistry, out string error)
     {
         error = string.Empty;
 
@@ -366,7 +383,12 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
             return true;
         }
 
-        var toolResult = _toolRegistry.FindTool(toolName);
+        if (toolRegistry is null)
+        {
+            return true;
+        }
+
+        var toolResult = toolRegistry.FindTool(toolName);
         if (toolResult.IsFail)
         {
             return true;
@@ -439,24 +461,6 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
         return true;
     }
 
-    private static string? FindMethod(ReadOnlyMemory<byte> body)
-    {
-        if (body.IsEmpty)
-        {
-            return default;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(body);
-            return TryReadStringProperty(document.RootElement, "method"u8);
-        }
-        catch
-        {
-            return default;
-        }
-    }
-
     private static string? TryReadStringProperty(JsonElement? element, ReadOnlySpan<byte> propertyName)
     {
         if (element is not { } root || root.ValueKind != JsonValueKind.Object)
@@ -465,13 +469,6 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
         }
 
         return root.TryGetProperty(propertyName, out var propertyElement) && propertyElement.ValueKind == JsonValueKind.String
-            ? propertyElement.GetString()
-            : default;
-    }
-
-    private static string? TryReadStringProperty(JsonElement element, ReadOnlySpan<byte> propertyName)
-    {
-        return element.TryGetProperty(propertyName, out var propertyElement) && propertyElement.ValueKind == JsonValueKind.String
             ? propertyElement.GetString()
             : default;
     }
@@ -687,6 +684,32 @@ public sealed class StreamableHttpMcpRequestProcessor : IStreamableHttpMcpReques
         public static DispatchOutcome Fail(Error error)
         {
             return new DispatchOutcome(default, error, isSuccess: false);
+        }
+    }
+
+    private readonly struct SessionCreationOutcome
+    {
+        private SessionCreationOutcome(StreamableHttpMcpSessionContext? session, Error? error, bool isSuccess)
+        {
+            Session = session;
+            Error = error;
+            IsSuccess = isSuccess;
+        }
+
+        public StreamableHttpMcpSessionContext? Session { get; }
+
+        public Error? Error { get; }
+
+        public bool IsSuccess { get; }
+
+        public static SessionCreationOutcome Success(StreamableHttpMcpSessionContext session)
+        {
+            return new SessionCreationOutcome(session, default, isSuccess: true);
+        }
+
+        public static SessionCreationOutcome Fail(Error error)
+        {
+            return new SessionCreationOutcome(default, error, isSuccess: false);
         }
     }
 

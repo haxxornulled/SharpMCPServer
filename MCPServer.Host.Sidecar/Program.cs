@@ -906,8 +906,6 @@ internal static class SshHostSidecarConsole
 
     private static string DefaultVaultKeyPath(SidecarOptions? options = null) => Path.Combine(DefaultBasePath(options), "ssh-vault.key");
 
-    private static string DefaultProfilePath(SidecarOptions? options = null) => Path.Combine(DefaultBasePath(options), "ssh-profiles.local.json");
-
     private static string DefaultProfileDatabasePath(SidecarOptions? options = null) => Path.Combine(DefaultBasePath(options), "ssh-store.db");
 
     private static JsonDocument? ParseArguments(string? json, out JsonElement? arguments, out string? error)
@@ -1257,9 +1255,6 @@ internal sealed class SidecarOptions
       --profile-db-path <path>     SQLite SSH provider store path. Defaults to user LocalAppData/McpServer/ssh/ssh-store.db.
       --vault-path <path>          Provider compatibility setting. New secrets are still stored in SQLite.
       --vault-key-path <path>      Provider compatibility setting. New secrets are still stored in SQLite.
-      --profile-path <path>        Legacy JSON profile import path. Defaults to user LocalAppData/McpServer/ssh/ssh-profiles.local.json.
-      --import-profiles-from-json <true|false>
-                                  Import legacy JSON profiles into SQLite when the database is empty.
       --output json                Emit JSON for list/upsert/replace commands.
 
     Profile upsert options:

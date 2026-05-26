@@ -5,7 +5,7 @@ namespace MCPServer.Infrastructure.Mcp.Stdio;
 
 public interface IStdioMcpClientFeatureTransport
 {
-    void Attach(Stream output, IJsonRpcResponseSerializer serializer);
+    void Attach(Stream output, IJsonRpcResponseSerializer serializer, SemaphoreSlim writeLock);
 
     bool TryHandleResponse(JsonRpcMessage message);
 }

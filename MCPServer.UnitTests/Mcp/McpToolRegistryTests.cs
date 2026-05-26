@@ -73,9 +73,9 @@ public sealed class McpToolRegistryTests
     {
         var tools = new IMcpTool[]
         {
-            new ClientSampleTool(new NoOpClientFeatureInvoker()),
-            new ClientElicitFormTool(new NoOpClientFeatureInvoker()),
-            new ClientElicitUrlTool(new NoOpClientFeatureInvoker())
+            new ClientSampleTool(() => new NoOpClientFeatureInvoker()),
+            new ClientElicitFormTool(() => new NoOpClientFeatureInvoker()),
+            new ClientElicitUrlTool(() => new NoOpClientFeatureInvoker())
         };
 
         foreach (var tool in tools)

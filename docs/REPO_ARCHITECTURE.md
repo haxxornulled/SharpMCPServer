@@ -12,6 +12,13 @@ Core AgentRouter packages:
 Provider-neutral execution seam:
 - `MCPServer.Execution.Abstractions`
 
+Client runtime and bridge:
+- `MCPServer.Client`
+- `MCPServer.Client.Infrastructure`
+- `MCPServer.Client.Console`
+- `MCPServer.AgentRouter.PythonBridge.Native`
+- `python/`
+
 SSH provider/runtime and adapters:
 - `MCPServer.Ssh`
 - `MCPServer.ExecutionPlugins.Ssh`
@@ -27,6 +34,7 @@ Composition/admin:
 - `MCPServer.AgentRouter.Defaults` does not exist.
 - `MCPServer.AgentRouter.Ssh` does not exist.
 - Default/no-op router composition lives in `MCPServer.AgentRouter.Hosting`.
+- `MCPServer.Client` stays protocol-facing and reusable; browser launch, loopback auth flow, and other implementation details live in `MCPServer.Client.Infrastructure` or the composition root.
 - SSH execution integration lives outside the AgentRouter namespace in `MCPServer.ExecutionPlugins.Ssh`.
 - `MCPServer.Ssh` owns SSH runtime, policy, profile storage, and credential vault behavior.
 - `MCPServer.Tools.Ssh` owns MCP SSH tool exposure only.

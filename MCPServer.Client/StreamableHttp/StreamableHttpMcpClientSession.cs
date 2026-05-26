@@ -915,7 +915,7 @@ public sealed class StreamableHttpMcpClientSession : IMcpClientSession
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, _options.Endpoint);
-        ApplyPostHeaders(request, acceptEventStream: false, method, mcpName: null);
+        ApplyPostHeaders(request, acceptEventStream: true, method, mcpName: null);
         request.Content = new StringContent(Encoding.UTF8.GetString(buffer.ToArray()), Encoding.UTF8, "application/json");
         var response = await SendWithAuthorizationAsync(request, cancellationToken).ConfigureAwait(false);
         if (response.IsSucc)
@@ -943,7 +943,7 @@ public sealed class StreamableHttpMcpClientSession : IMcpClientSession
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, _options.Endpoint);
-        ApplyPostHeaders(request, acceptEventStream: false, method, mcpName: null);
+        ApplyPostHeaders(request, acceptEventStream: true, method, mcpName: null);
         request.Content = new StringContent(Encoding.UTF8.GetString(buffer.ToArray()), Encoding.UTF8, "application/json");
         var response = await SendWithAuthorizationAsync(request, cancellationToken).ConfigureAwait(false);
         if (response.IsSucc)

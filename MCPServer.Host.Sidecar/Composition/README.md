@@ -7,6 +7,7 @@ Rules:
 - `Program.cs` should remain focused on command dispatch and CLI behavior.
 - Sidecar runtime wiring belongs in sidecar-owned composition modules or factories.
 - SSH provider concerns should still be resolved through `MCPServer.Ssh`; the sidecar should not grow a second persistence/runtime subsystem.
+- SSH profile state is SQLite-backed end to end; the sidecar CLI should write straight into the profile database, not into JSON profile files.
 - Path/display-path resolution and runtime creation should stay behind sidecar-owned composition helpers.
 
 Current direction:

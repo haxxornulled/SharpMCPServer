@@ -16,6 +16,7 @@ namespace MCPServer.ProtocolTests.Mcp;
 internal sealed class ProtocolTranscriptHarness : IDisposable
 {
     private readonly IContainer _container;
+    private readonly ILifetimeScope _sessionScope;
     private readonly IJsonRpcMessageParser _parser;
     private readonly IMcpRequestDispatcher _dispatcher;
     private readonly IJsonRpcResponseSerializer _serializer;
@@ -24,9 +25,10 @@ internal sealed class ProtocolTranscriptHarness : IDisposable
     private ProtocolTranscriptHarness(IContainer container)
     {
         _container = container;
-        _parser = _container.Resolve<IJsonRpcMessageParser>();
-        _dispatcher = _container.Resolve<IMcpRequestDispatcher>();
-        _serializer = _container.Resolve<IJsonRpcResponseSerializer>();
+        _sessionScope = _container.BeginLifetimeScope(McpLifetimeScopeTags.Session);
+        _parser = _sessionScope.Resolve<IJsonRpcMessageParser>();
+        _dispatcher = _sessionScope.Resolve<IMcpRequestDispatcher>();
+        _serializer = _sessionScope.Resolve<IJsonRpcResponseSerializer>();
     }
 
     public static ProtocolTranscriptHarness Create()
@@ -111,6 +113,7 @@ internal sealed class ProtocolTranscriptHarness : IDisposable
             return;
         }
 
+        _sessionScope.Dispose();
         _container.Dispose();
         _disposed = true;
     }
