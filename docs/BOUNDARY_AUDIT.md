@@ -67,3 +67,10 @@ Implemented across both the stdio and Streamable HTTP edges through `IMcpClientF
 Task status notifications are also published through the same runtime boundary so that task-augmented requests stay observable across both transports.
 
 See [docs/SPEC_COMPLIANCE.md](SPEC_COMPLIANCE.md) for the current protocol implementation matrix before adding more boundary cases.
+
+## Workspace Sandboxes and File Editing
+
+- `MCPServer.Workspace` owns workspace roots, sandbox persistence, file policy, and approval-gated create/delete operations.
+- `MCPServer.Tools.Workspace` remains the MCP adapter surface only.
+- Workspace sandbox state is persisted in SQLite so stdio and Streamable HTTP host instances share the same sandbox registry when they use the same database path.
+- The workspace file tools stay constrained to approved roots and sandboxes; they do not become a machine-wide filesystem API.

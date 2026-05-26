@@ -16,6 +16,10 @@ Host-side shared domain:
 - `MCPServer.Domain`
 - `MCPServer.Application` consumes the shared host-side domain model
 
+Workspace editing and sandboxes:
+- `MCPServer.Workspace`
+- `MCPServer.Tools.Workspace`
+
 Client runtime and bridge:
 - `MCPServer.Client`
 - `MCPServer.Client.Infrastructure`
@@ -39,6 +43,8 @@ Composition/admin:
 - `MCPServer.AgentRouter.Ssh` does not exist.
 - Default/no-op router composition lives in `MCPServer.AgentRouter.Hosting`.
 - `MCPServer.Client` stays protocol-facing and reusable; browser launch, loopback auth flow, and other implementation details live in `MCPServer.Client.Infrastructure` or the composition root.
+- `MCPServer.Workspace` owns workspace roots, sandbox persistence, and file policy; `MCPServer.Tools.Workspace` is the MCP adapter surface only.
+- Workspace sandboxes are persisted in SQLite and are transport-agnostic, so stdio and HTTP see the same state when they use the same database path.
 - SSH execution integration lives outside the AgentRouter namespace in `MCPServer.ExecutionPlugins.Ssh`.
 - `MCPServer.Ssh` owns SSH runtime, policy, profile storage, and credential vault behavior.
 - `MCPServer.Tools.Ssh` owns MCP SSH tool exposure only.

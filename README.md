@@ -10,11 +10,25 @@ Protocol baseline: MCP 2025-11-25. The current implementation matrix lives in [d
 
 - `MCPServer.Host` is the primary MCP server host.
 - `MCPServer.Host.Sidecar` is the sidecar entry point for host composition.
+- `MCPServer.Workspace` owns workspace roots, sandbox registry persistence, and workspace file policy.
+- `MCPServer.Tools.Workspace` exposes the workspace MCP tool surface.
 - `MCPServer.Client.Console` is the local client for stdio and HTTP checks.
 - `MCPServer.AgentRouter.*` contains the AgentRouter contracts, application layer, infrastructure, and hosting composition.
 - `MCPServer.Ssh` and `MCPServer.Tools.Ssh` own SSH policy, runtime, and MCP tool exposure.
 - `python/` contains the `ctypes` wrapper for the NativeAOT bridge.
 - `scripts/Sync-PythonBridge.ps1` publishes the native bridge, syncs the Python package payload, and can build the wheel.
+
+## Workspace sandboxes
+
+Workspace editing is workspace-root scoped and shared across stdio and Streamable HTTP through a SQLite-backed sandbox registry.
+
+- `workspace.roots.list` exposes the approved roots.
+- `workspace.sandboxes.list`, `workspace.sandboxes.create`, and `workspace.sandboxes.delete` manage durable sandboxes.
+- `workspace.files.read`, `workspace.files.search`, `workspace.files.write`, and `workspace.files.applyPatch` operate inside approved roots and sandboxes only.
+- Sandbox operations are approval-gated.
+- Default paths live under `%LocalAppData%\MCPServer\workspace\workspace.db` and `%LocalAppData%\MCPServer\workspaces` unless overridden.
+
+See [docs/WORKSPACE_SANDBOXES.md](docs/WORKSPACE_SANDBOXES.md) for the full model.
 
 ## Architecture at a glance
 
@@ -36,11 +50,16 @@ flowchart LR
         Infra["MCPServer.Infrastructure"]
         App["MCPServer.Application"]
         Domain["MCPServer.Domain\n(host-side shared domain)"]
+        Workspace["MCPServer.Workspace"]
+        WorkspaceTools["MCPServer.Tools.Workspace"]
 
         MainHost --> Infra
         Infra --> App
         App --> Domain
         MainHost -.-> App
+        MainHost --> Workspace
+        MainHost --> WorkspaceTools
+        WorkspaceTools --> Workspace
     end
 
     subgraph SshBoundary["SSH boundary"]
@@ -117,6 +136,7 @@ If you only need the wrapper package layout, see [python/README.md](python/READM
 - [docs/REPO_ARCHITECTURE.md](docs/REPO_ARCHITECTURE.md)
 - [docs/BUILD_AND_TEST.md](docs/BUILD_AND_TEST.md)
 - [docs/INSTALL.md](docs/INSTALL.md)
+- [docs/WORKSPACE_SANDBOXES.md](docs/WORKSPACE_SANDBOXES.md)
 - [docs/SSH_BOUNDARY.md](docs/SSH_BOUNDARY.md)
 - [docs/AGENT_ROUTER_BOUNDARY.md](docs/AGENT_ROUTER_BOUNDARY.md)
 - [docs/SPEC_COMPLIANCE.md](docs/SPEC_COMPLIANCE.md)
@@ -129,3 +149,6 @@ If you only need the wrapper package layout, see [python/README.md](python/READM
 - No MediatR.
 - Keep boundaries explicit.
 - Fix the first real failure before chasing downstream metadata errors.
+
+Keywords: MCP, .NET 10, NativeAOT, SQLite, SSH, Streamable HTTP, workspace sandboxes, Python bridge, VS2026.
+Yoda likes the good green.

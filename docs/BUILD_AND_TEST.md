@@ -19,6 +19,7 @@ dotnet test .\MCPServer.slnx -c Debug
 - The repo uses `System.Text.Json` source generation and disables default reflection-based serialization in `Directory.Build.props`.
 - Test projects are expected to restore through standard SDK-style package references.
 - The Python bridge has its own sync/build step and should be validated from the published wheel when that surface changes.
+- Workspace sandbox state is persisted in SQLite, so changes to the workspace layer should be exercised through both the workspace unit tests and the host-level smoke tests that attach over stdio and Streamable HTTP.
 
 ## Suggested verification order when debugging compile failures
 
@@ -28,6 +29,8 @@ If the whole solution fails, start with the lowest-level projects and move upwar
 dotnet build .\MCPServer.Domain\MCPServer.Domain.csproj
 dotnet build .\MCPServer.Client\MCPServer.Client.csproj
 dotnet build .\MCPServer.Application\MCPServer.Application.csproj
+dotnet build .\MCPServer.Workspace\MCPServer.Workspace.csproj
+dotnet build .\MCPServer.Tools.Workspace\MCPServer.Tools.Workspace.csproj
 dotnet build .\MCPServer.Client.Infrastructure\MCPServer.Client.Infrastructure.csproj
 dotnet build .\MCPServer.Infrastructure\MCPServer.Infrastructure.csproj
 dotnet build .\MCPServer.Ssh\MCPServer.Ssh.csproj
