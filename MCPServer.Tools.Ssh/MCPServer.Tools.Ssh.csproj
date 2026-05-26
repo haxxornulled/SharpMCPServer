@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>MCPServer.Tools.Ssh</PackageId>
+    <Title>MCPServer SSH MCP Tools</Title>
+    <Description>MCP tool adapter package for the public MCPServer.Ssh provider API.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac" />
+    <PackageReference Include="LanguageExt.Core" />
+    <ProjectReference Include="..\MCPServer.Application\MCPServer.Application.csproj" />
+    <ProjectReference Include="..\MCPServer.Domain\MCPServer.Domain.csproj" />
+    <ProjectReference Include="..\MCPServer.Ssh\MCPServer.Ssh.csproj" />
+  </ItemGroup>
+
+</Project>

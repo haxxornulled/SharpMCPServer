@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac" />
+    <ProjectReference Include="..\MCPServer.Application\MCPServer.Application.csproj" />
+    <ProjectReference Include="..\MCPServer.Domain\MCPServer.Domain.csproj" />
+    <ProjectReference Include="..\MCPServer.Infrastructure\MCPServer.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

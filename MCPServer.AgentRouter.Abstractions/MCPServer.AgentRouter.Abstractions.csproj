@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>MCPServer.AgentRouter.Abstractions</PackageId>
+    <Title>MCPServer AgentRouter Abstractions</Title>
+    <Description>Contracts and immutable DTOs for MCPServer host-side AgentRouter providers.</Description>
+    <Authors>MCPServer</Authors>
+    <PackageTags>mcp;agent-router;abstractions</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LanguageExt.Core" />
+  </ItemGroup>
+
+</Project>

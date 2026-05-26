@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac" />
+    <PackageReference Include="LanguageExt.Core" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MCPServer.AgentRouter.Abstractions\MCPServer.AgentRouter.Abstractions.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Domain\MCPServer.AgentRouter.Domain.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Application\MCPServer.AgentRouter.Application.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Infrastructure\MCPServer.AgentRouter.Infrastructure.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Hosting\MCPServer.AgentRouter.Hosting.csproj" />
+    <ProjectReference Include="..\MCPServer.ExecutionPlugins.Ssh\MCPServer.ExecutionPlugins.Ssh.csproj" />
+    <ProjectReference Include="..\MCPServer.Tools.Ssh\MCPServer.Tools.Ssh.csproj" />
+    <ProjectReference Include="..\MCPServer.Ssh\MCPServer.Ssh.csproj" />
+  </ItemGroup>
+
+</Project>

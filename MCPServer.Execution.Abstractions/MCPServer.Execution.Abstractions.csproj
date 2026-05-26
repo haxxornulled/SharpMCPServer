@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>MCPServer.Execution.Abstractions</PackageId>
+    <Title>MCPServer Execution Abstractions</Title>
+    <Description>Provider-neutral execution plugin contracts for MCPServer host-side orchestration.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="LanguageExt.Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MCPServer.AgentRouter.Abstractions\MCPServer.AgentRouter.Abstractions.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Domain\MCPServer.AgentRouter.Domain.csproj" />
+  </ItemGroup>
+</Project>

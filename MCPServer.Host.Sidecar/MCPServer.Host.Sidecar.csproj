@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac" />
+    <PackageReference Include="LanguageExt.Core" />
+    <ProjectReference Include="..\MCPServer.Client\MCPServer.Client.csproj" />
+    <ProjectReference Include="..\MCPServer.Domain\MCPServer.Domain.csproj" />
+    <ProjectReference Include="..\MCPServer.Ssh\MCPServer.Ssh.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,519 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using MCPServer.Application.Mcp.Interfaces;
+using MCPServer.Application.Mcp.JsonRpc.Interfaces;
+using MCPServer.Domain.Mcp;
+using MCPServer.Infrastructure.Mcp.Http.Authorization;
+using MCPServer.Infrastructure.Mcp.JsonRpc;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace MCPServer.Infrastructure.Mcp.Http;
+
+public sealed class StreamableHttpMcpServerService : BackgroundService
+{
+    private const string JsonContentType = "application/json";
+    private const string TextEventStreamContentType = "text/event-stream";
+    private const string AllowHeaderValue = "GET, POST, DELETE";
+
+    private readonly StreamableHttpMcpTransportOptions _options;
+    private readonly IMcpHttpAuthorizationService _authorizationService;
+    private readonly IMcpProtectedResourceMetadataProvider _metadataProvider;
+    private readonly IStreamableHttpMcpSessionTransport _sessionTransport;
+    private readonly IStreamableHttpMcpRequestProcessor _processor;
+    private readonly IJsonRpcResponseSerializer _serializer;
+    private readonly ILogger<StreamableHttpMcpServerService> _logger;
+
+    public StreamableHttpMcpServerService(
+        StreamableHttpMcpTransportOptions options,
+        IMcpHttpAuthorizationService authorizationService,
+        IMcpProtectedResourceMetadataProvider metadataProvider,
+        IStreamableHttpMcpSessionTransport sessionTransport,
+        IStreamableHttpMcpRequestProcessor processor,
+        IJsonRpcResponseSerializer serializer,
+        ILogger<StreamableHttpMcpServerService> logger)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(authorizationService);
+        ArgumentNullException.ThrowIfNull(metadataProvider);
+        ArgumentNullException.ThrowIfNull(sessionTransport);
+        ArgumentNullException.ThrowIfNull(processor);
+        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        _options = options;
+        _authorizationService = authorizationService;
+        _metadataProvider = metadataProvider;
+        _sessionTransport = sessionTransport;
+        _processor = processor;
+        _serializer = serializer;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        if (!_options.Enabled)
+        {
+            _logger.LogInformation("MCP Streamable HTTP transport is disabled.");
+            return;
+        }
+
+        var prefixes = _options.GetListenerPrefixes();
+        if (prefixes.Count == 0)
+        {
+            _logger.LogWarning("MCP Streamable HTTP transport is enabled but no listener prefixes were configured.");
+            return;
+        }
+
+        using var listener = new HttpListener();
+        foreach (var prefix in prefixes)
+        {
+            listener.Prefixes.Add(prefix);
+        }
+
+        listener.Start();
+        using var cancellationRegistration = stoppingToken.Register(static state =>
+        {
+            if (state is HttpListener httpListener)
+            {
+                try
+                {
+                    httpListener.Stop();
+                }
+                catch
+                {
+                }
+            }
+        }, listener);
+
+        _logger.LogInformation("MCP Streamable HTTP transport started on {Prefixes}", string.Join(", ", prefixes));
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            HttpListenerContext? context;
+            try
+            {
+                context = await listener.GetContextAsync().ConfigureAwait(false);
+            }
+            catch (HttpListenerException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (ObjectDisposedException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            _ = HandleContextAsync(context, stoppingToken);
+        }
+    }
+
+    private async Task HandleContextAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var requestUri = context.Request.Url ?? new Uri("http://127.0.0.1/");
+            if (_options.Authorization.Enabled && _metadataProvider.IsProtectedResourceMetadataRequest(requestUri))
+            {
+                await HandleProtectedResourceMetadataAsync(context, requestUri, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (!IsMcpRequest(requestUri))
+            {
+                await WriteResponseAsync(context.Response, NotFound(), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var requestEnvelope = ReadRequestEnvelope(context.Request);
+            if (_options.Authorization.Enabled)
+            {
+                var authorizationDecision = await _authorizationService.AuthorizeAsync(requestEnvelope, cancellationToken).ConfigureAwait(false);
+                if (!authorizationDecision.IsAuthorized)
+                {
+                    await WriteAuthorizationFailureAsync(context.Response, authorizationDecision, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+            }
+
+            var request = await ReadRequestAsync(context.Request, requestEnvelope, cancellationToken).ConfigureAwait(false);
+
+            if (string.Equals(request.Method, HttpMethod.Get.Method, StringComparison.OrdinalIgnoreCase))
+            {
+                await HandleGetAsync(context, request, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (string.Equals(request.Method, HttpMethod.Delete.Method, StringComparison.OrdinalIgnoreCase))
+            {
+                await HandleDeleteAsync(context, request, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (string.Equals(request.Method, HttpMethod.Post.Method, StringComparison.OrdinalIgnoreCase))
+            {
+                var response = await _processor.ProcessAsync(request, cancellationToken).ConfigureAwait(false);
+                await WriteResponseAsync(context.Response, response, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            await WriteResponseAsync(context.Response, MethodNotAllowed(), cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to process MCP Streamable HTTP request.");
+            TryWriteFailure(context.Response, HttpStatusCode.InternalServerError);
+        }
+        finally
+        {
+            try
+            {
+                context.Response.OutputStream.Close();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                context.Response.Close();
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private async Task HandleProtectedResourceMetadataAsync(HttpListenerContext context, Uri requestUri, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(context.Request.HttpMethod, HttpMethod.Get.Method, StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteResponseAsync(context.Response, MethodNotAllowed("GET"), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var document = _metadataProvider.CreateDocument(requestUri);
+        await using var stream = new MemoryStream();
+        await JsonSerializer.SerializeAsync(
+            stream,
+            document,
+            McpHttpAuthorizationJsonSerializerContext.Default.McpProtectedResourceMetadataDocument,
+            cancellationToken).ConfigureAwait(false);
+
+        await WriteResponseAsync(
+            context.Response,
+            new StreamableHttpMcpResponse
+            {
+                StatusCode = HttpStatusCode.OK,
+                ContentType = JsonContentType,
+                Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Cache-Control"] = "no-cache"
+                },
+                Body = stream.ToArray()
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task HandleGetAsync(HttpListenerContext context, StreamableHttpMcpRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryValidateOrigin(request, out var originError))
+        {
+            await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(HttpStatusCode.Forbidden, originError).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (!TryValidateGetHeaders(request, out var getHeaderError))
+        {
+            await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(HttpStatusCode.BadRequest, getHeaderError).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (!_sessionTransport.TryValidateSessionRequest(request, isInitialize: false, out var sessionStatus, out var sessionError))
+        {
+            await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(sessionStatus, sessionError).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (!TryValidateProtocolVersion(request, out var protocolVersionError))
+        {
+            await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(HttpStatusCode.BadRequest, protocolVersionError).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (!_sessionTransport.TryValidateEventStreamRequest(request.GetHeader(StreamableHttpMcpHeaderNames.LastEventId), out var eventStreamStatus, out var eventStreamError))
+        {
+            await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(eventStreamStatus, eventStreamError).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var response = context.Response;
+        response.StatusCode = (int)HttpStatusCode.OK;
+        response.ContentType = TextEventStreamContentType;
+        response.SendChunked = true;
+        response.Headers["Cache-Control"] = "no-cache";
+        response.Headers["Connection"] = "keep-alive";
+        response.Headers["X-Accel-Buffering"] = "no";
+
+        if (_sessionTransport.SessionId is { } sessionId)
+        {
+            response.Headers[StreamableHttpMcpHeaderNames.SessionId] = sessionId;
+        }
+
+        await _sessionTransport.OpenEventStreamAsync(
+            response.OutputStream,
+            request.GetHeader(StreamableHttpMcpHeaderNames.LastEventId),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task HandleDeleteAsync(HttpListenerContext context, StreamableHttpMcpRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryValidateOrigin(request, out var originError))
+        {
+            await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(HttpStatusCode.Forbidden, originError).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (!TryValidateDeleteHeaders(request, out var deleteHeaderError))
+        {
+            await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(HttpStatusCode.BadRequest, deleteHeaderError).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (!_sessionTransport.TryValidateSessionRequest(request, isInitialize: false, out var sessionStatus, out var sessionError))
+        {
+            await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(sessionStatus, sessionError).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (!TryValidateProtocolVersion(request, out var protocolVersionError))
+        {
+            await WriteResponseAsync(context.Response, await BuildErrorResponseAsync(HttpStatusCode.BadRequest, protocolVersionError).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        _sessionTransport.TerminateSession();
+        context.Response.StatusCode = (int)HttpStatusCode.NoContent;
+        context.Response.ContentLength64 = 0;
+        await context.Response.OutputStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static StreamableHttpMcpRequestEnvelope ReadRequestEnvelope(HttpListenerRequest request)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var headerNames = request.Headers.AllKeys ?? Array.Empty<string>();
+        foreach (var headerName in headerNames)
+        {
+            if (headerName is null)
+            {
+                continue;
+            }
+
+            var headerValue = request.Headers[headerName];
+            headers[headerName] = headerValue is null ? string.Empty : headerValue;
+        }
+
+        return new StreamableHttpMcpRequestEnvelope
+        {
+            Method = request.HttpMethod,
+            RequestUri = request.Url ?? new Uri("http://127.0.0.1/"),
+            Headers = headers
+        };
+    }
+
+    private async ValueTask<StreamableHttpMcpRequest> ReadRequestAsync(HttpListenerRequest request, StreamableHttpMcpRequestEnvelope requestEnvelope, CancellationToken cancellationToken)
+    {
+        await using var memory = new MemoryStream();
+        await request.InputStream.CopyToAsync(memory, cancellationToken).ConfigureAwait(false);
+
+        return new StreamableHttpMcpRequest
+        {
+            Method = requestEnvelope.Method,
+            RequestUri = requestEnvelope.RequestUri,
+            Headers = requestEnvelope.Headers,
+            Body = memory.ToArray()
+        };
+    }
+
+    private async ValueTask WriteAuthorizationFailureAsync(HttpListenerResponse response, McpHttpAuthorizationDecision decision, CancellationToken cancellationToken)
+    {
+        response.StatusCode = (int)decision.StatusCode;
+        if (!string.IsNullOrWhiteSpace(decision.WwwAuthenticate))
+        {
+            response.Headers["WWW-Authenticate"] = decision.WwwAuthenticate;
+        }
+
+        response.ContentLength64 = 0;
+        await response.OutputStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask WriteResponseAsync(HttpListenerResponse response, StreamableHttpMcpResponse transportResponse, CancellationToken cancellationToken)
+    {
+        response.StatusCode = (int)transportResponse.StatusCode;
+
+        if (transportResponse.ContentType is { Length: > 0 })
+        {
+            response.ContentType = transportResponse.ContentType;
+        }
+
+        foreach (var header in transportResponse.Headers)
+        {
+            response.Headers[header.Key] = header.Value;
+        }
+
+        if (transportResponse.Body is not { Length: > 0 } body)
+        {
+            response.ContentLength64 = 0;
+            await response.OutputStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        response.ContentLength64 = body.Length;
+        await response.OutputStream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
+        await response.OutputStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private void TryWriteFailure(HttpListenerResponse response, HttpStatusCode statusCode)
+    {
+        try
+        {
+            response.StatusCode = (int)statusCode;
+            response.ContentLength64 = 0;
+            response.OutputStream.Flush();
+        }
+        catch
+        {
+        }
+    }
+
+    private static StreamableHttpMcpResponse MethodNotAllowed(string? allow = null)
+    {
+        return new StreamableHttpMcpResponse
+        {
+            StatusCode = HttpStatusCode.MethodNotAllowed,
+            Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Allow"] = allow ?? AllowHeaderValue
+            }
+        };
+    }
+
+    private static StreamableHttpMcpResponse NotFound()
+    {
+        return new StreamableHttpMcpResponse
+        {
+            StatusCode = HttpStatusCode.NotFound
+        };
+    }
+
+    private async ValueTask<StreamableHttpMcpResponse> BuildErrorResponseAsync(HttpStatusCode statusCode, string message)
+    {
+        var response = JsonRpcResponse.Failure(JsonRpcRequestId.Missing, JsonRpcErrorCodes.InvalidRequest, message);
+        await using var stream = new MemoryStream();
+        await _serializer.WriteAsync(stream, response, CancellationToken.None).ConfigureAwait(false);
+
+        return new StreamableHttpMcpResponse
+        {
+            StatusCode = statusCode,
+            ContentType = JsonContentType,
+            Body = stream.ToArray()
+        };
+    }
+
+    private static bool TryValidateOrigin(StreamableHttpMcpRequest request, out string error)
+    {
+        var originHeader = request.GetHeader(StreamableHttpMcpHeaderNames.Origin);
+        if (string.IsNullOrWhiteSpace(originHeader))
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        if (!Uri.TryCreate(originHeader, UriKind.Absolute, out var originUri) ||
+            !originUri.IsLoopback ||
+            !string.Equals(originUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(originUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            error = "Invalid Origin header.";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryValidateGetHeaders(StreamableHttpMcpRequest request, out string error)
+    {
+        if (!HasMediaType(request.GetHeader(StreamableHttpMcpHeaderNames.Accept), TextEventStreamContentType))
+        {
+            error = "Accept header must include text/event-stream.";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryValidateDeleteHeaders(StreamableHttpMcpRequest request, out string error)
+    {
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryValidateProtocolVersion(StreamableHttpMcpRequest request, out string error)
+    {
+        var protocolVersion = request.GetHeader(StreamableHttpMcpHeaderNames.ProtocolVersion);
+        if (string.IsNullOrWhiteSpace(protocolVersion))
+        {
+            error = "Missing MCP-Protocol-Version header.";
+            return false;
+        }
+
+        if (!McpProtocolVersions.IsSupported(protocolVersion))
+        {
+            error = $"Unsupported MCP protocol version '{protocolVersion}'.";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private bool IsMcpRequest(Uri requestUri)
+    {
+        var configuredPath = StreamableHttpMcpTransportOptions.NormalizePath(_options.Path);
+        var requestPath = requestUri.AbsolutePath;
+        return string.Equals(requestPath, configuredPath, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(requestPath.TrimEnd('/'), configuredPath.TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasMediaType(string? headerValue, string mediaType)
+    {
+        if (string.IsNullOrWhiteSpace(headerValue))
+        {
+            return false;
+        }
+
+        var values = headerValue.Split(',');
+        for (var i = 0; i < values.Length; i++)
+        {
+            var token = values[i].Trim();
+            var semicolonIndex = token.IndexOf(';');
+            if (semicolonIndex >= 0)
+            {
+                token = token[..semicolonIndex].Trim();
+            }
+
+            if (string.Equals(token, mediaType, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}

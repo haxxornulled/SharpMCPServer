@@ -1,0 +1,32 @@
+# Repo Architecture
+
+## Current shape
+
+Core AgentRouter packages:
+- `MCPServer.AgentRouter.Abstractions`
+- `MCPServer.AgentRouter.Domain`
+- `MCPServer.AgentRouter.Application`
+- `MCPServer.AgentRouter.Infrastructure`
+- `MCPServer.AgentRouter.Hosting`
+
+Provider-neutral execution seam:
+- `MCPServer.Execution.Abstractions`
+
+SSH provider/runtime and adapters:
+- `MCPServer.Ssh`
+- `MCPServer.ExecutionPlugins.Ssh`
+- `MCPServer.Tools.Ssh`
+
+Composition/admin:
+- `MCPServer.Host`
+- `MCPServer.Host.Sidecar`
+
+## Boundary rules
+
+- AgentRouter core is provider-neutral.
+- `MCPServer.AgentRouter.Defaults` does not exist.
+- `MCPServer.AgentRouter.Ssh` does not exist.
+- Default/no-op router composition lives in `MCPServer.AgentRouter.Hosting`.
+- SSH execution integration lives outside the AgentRouter namespace in `MCPServer.ExecutionPlugins.Ssh`.
+- `MCPServer.Ssh` owns SSH runtime, policy, profile storage, and credential vault behavior.
+- `MCPServer.Tools.Ssh` owns MCP SSH tool exposure only.

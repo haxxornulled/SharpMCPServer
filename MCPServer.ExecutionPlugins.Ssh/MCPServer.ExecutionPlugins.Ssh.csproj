@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>MCPServer.ExecutionPlugins.Ssh</PackageId>
+    <Title>MCPServer SSH Execution Plugin</Title>
+    <Description>SSH-backed execution plugin for provider-neutral MCPServer execution orchestration.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Autofac" />
+    <PackageReference Include="LanguageExt.Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MCPServer.Execution.Abstractions\MCPServer.Execution.Abstractions.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Application\MCPServer.AgentRouter.Application.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Domain\MCPServer.AgentRouter.Domain.csproj" />
+    <ProjectReference Include="..\MCPServer.Ssh\MCPServer.Ssh.csproj" />
+  </ItemGroup>
+</Project>

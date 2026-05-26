@@ -1,0 +1,24 @@
+<Solution>
+  <Project Path="MCPServer.Host/MCPServer.Host.csproj" />
+  <Project Path="MCPServer.AgentRouter.Abstractions/MCPServer.AgentRouter.Abstractions.csproj" />
+  <Project Path="MCPServer.AgentRouter.Domain/MCPServer.AgentRouter.Domain.csproj" />
+  <Project Path="MCPServer.AgentRouter.Tests/MCPServer.AgentRouter.Tests.csproj" />
+  <Project Path="MCPServer.AgentRouter.IntegrationTests/MCPServer.AgentRouter.IntegrationTests.csproj" />
+  <Project Path="MCPServer.AgentRouter.Application/MCPServer.AgentRouter.Application.csproj" />
+  <Project Path="MCPServer.AgentRouter.PythonBridge.Native/MCPServer.AgentRouter.PythonBridge.Native.csproj" />
+  <Project Path="MCPServer.AgentRouter.Infrastructure/MCPServer.AgentRouter.Infrastructure.csproj" />
+  <Project Path="MCPServer.AgentRouter.Hosting/MCPServer.AgentRouter.Hosting.csproj" />
+  <Project Path="MCPServer.Application/MCPServer.Application.csproj" />
+  <Project Path="MCPServer.Execution.Abstractions/MCPServer.Execution.Abstractions.csproj" />
+  <Project Path="MCPServer.ExecutionPlugins.Ssh/MCPServer.ExecutionPlugins.Ssh.csproj" />
+  <Project Path="MCPServer.Domain/MCPServer.Domain.csproj" />
+  <Project Path="MCPServer.Infrastructure/MCPServer.Infrastructure.csproj" />
+  <Project Path="MCPServer.Client.Infrastructure/MCPServer.Client.Infrastructure.csproj" />
+  <Project Path="MCPServer.Ssh/MCPServer.Ssh.csproj" />
+  <Project Path="MCPServer.Tools.Ssh/MCPServer.Tools.Ssh.csproj" />
+  <Project Path="MCPServer.Client/MCPServer.Client.csproj" />
+  <Project Path="MCPServer.Client.Console/MCPServer.Client.Console.csproj" />
+  <Project Path="MCPServer.Host.Sidecar/MCPServer.Host.Sidecar.csproj" />
+  <Project Path="MCPServer.UnitTests/MCPServer.UnitTests.csproj" />
+  <Project Path="MCPServer.ProtocolTests/MCPServer.ProtocolTests.csproj" />
+</Solution>

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>MCPServer.AgentRouter.Hosting</PackageId>
+    <Title>MCPServer AgentRouter Hosting</Title>
+    <Description>Hosted lifecycle service adapter for running the provider-side AgentRouter worker loop.</Description>
+    <Authors>AgentRouter</Authors>
+    <PackageTags>agent-router;background-service;hosting;autofac;lifecycle</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac" />
+    <PackageReference Include="LanguageExt.Core" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MCPServer.AgentRouter.Abstractions\MCPServer.AgentRouter.Abstractions.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Application\MCPServer.AgentRouter.Application.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Infrastructure\MCPServer.AgentRouter.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
