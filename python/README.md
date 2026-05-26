@@ -22,18 +22,25 @@ If you are vendoring it from Git, point pip at the `python/` subdirectory:
 pip install "git+https://github.com/<your-org>/MCPServer.git#subdirectory=python"
 ```
 
-## Native library
+## Sync the native library
 
-The wrapper expects the NativeAOT shared library to be published separately.
-Set the path explicitly:
+The native bridge is published separately and copied into the package-local
+`python/src/mcpserver_agentrouter_bridge/native/` folder by a checked-in helper
+script.
+
+```powershell
+pwsh ./scripts/Sync-PythonBridge.ps1
+```
+
+The wrapper will discover the copied native library automatically. You can still
+set the explicit override if you want to point at a different build:
 
 ```powershell
 $env:MCP_SERVER_AGENTROUTER_NATIVE_LIBRARY = "C:\path\to\MCPServer.AgentRouter.PythonBridge.Native.dll"
 ```
 
-On non-Windows platforms, use the platform-specific shared library filename that `dotnet publish` produces.
-
-The wrapper also searches a few conventional locations, including a `native/` folder next to the package.
+On non-Windows platforms, use the platform-specific shared library filename
+that `dotnet publish` produces.
 
 ## Example
 
@@ -50,11 +57,13 @@ print(response["status"])
 print(response["message"])
 ```
 
-If you want the raw JSON boundary instead of Python dictionaries, use `run_json(...)`.
+If you want the raw JSON boundary instead of Python dictionaries, use
+`run_json(...)`.
 
 ## Smoke test
 
-If the native library path is configured, you can run the smoke test directly:
+If the native library has been synced into the package directory, you can run
+the smoke test directly:
 
 ```bash
 python -m unittest discover -s python/tests -p "test_native_smoke.py"

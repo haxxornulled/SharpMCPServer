@@ -30,3 +30,6 @@ include-package-data = true
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["mcpserver_agentrouter_bridge*"]
+
+[tool.setuptools.package-data]
+mcpserver_agentrouter_bridge = ["native/*"]

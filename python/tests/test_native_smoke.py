@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 import unittest
 from pathlib import Path
@@ -10,16 +9,16 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from mcpserver_agentrouter_bridge.bridge import DEFAULT_LIBRARY_ENV, AgentRouterBridge, resolve_library_path  # noqa: E402
+from mcpserver_agentrouter_bridge.bridge import AgentRouterBridge, resolve_library_path  # noqa: E402
 
 
 class NativeBridgeSmokeTests(unittest.TestCase):
     def test_round_trip_against_native_bridge(self) -> None:
-        library_hint = os.environ.get(DEFAULT_LIBRARY_ENV)
-        if not library_hint:
-            self.skipTest(f"Set {DEFAULT_LIBRARY_ENV} to run the native smoke test.")
+        try:
+            library_path = resolve_library_path()
+        except FileNotFoundError:
+            self.skipTest("Native library has not been synced into the package-native folder yet.")
 
-        library_path = resolve_library_path(library_hint)
         with AgentRouterBridge(library_path=library_path) as bridge:
             response = bridge.run(
                 {

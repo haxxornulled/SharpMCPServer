@@ -43,8 +43,6 @@ Repository guidance for agentic changes in `MCPServer`.
 - Keep SSH concerns limited to SSH execution backends. Do not expand the SSH tool pack to solve Agent Router concerns.
 - Do not silently mutate files outside configured workspace roots.
 - Do not add shell execution unless it is explicitly policy-gated.
-- For the NativeAOT Python bridge, export only boring C ABI entry points, require Python to free returned buffers through the matching export, and keep shutdown/lifecycle hooks explicit even if they are no-ops initially.
-
 ## Cancellation
 
 - Every async boundary should accept `CancellationToken`.
@@ -58,3 +56,5 @@ Repository guidance for agentic changes in `MCPServer`.
 - Add tests for important behavior and security boundaries.
 - When making changes, keep the implementation minimal but production-shaped.
 - When in doubt, preserve explicitness and make the boundary obvious in code.
+- For the NativeAOT Python bridge, export only boring C ABI entry points, require Python to free returned buffers through the matching export, and keep shutdown/lifecycle hooks explicit even if they are no-ops initially.
+- Keep the published native bridge copyable into the Python package-local `native/` directory through the checked-in sync script, and keep that directory gitignored except for sentinel files.
