@@ -12,6 +12,10 @@ Core AgentRouter packages:
 Provider-neutral execution seam:
 - `MCPServer.Execution.Abstractions`
 
+Host-side shared domain:
+- `MCPServer.Domain`
+- `MCPServer.Application` consumes the shared domain model
+
 Client runtime and bridge:
 - `MCPServer.Client`
 - `MCPServer.Client.Infrastructure`

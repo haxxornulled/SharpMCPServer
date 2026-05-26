@@ -2,7 +2,7 @@
 
 MCPServer is a .NET 10 workspace for an MCP host, SSH tooling, AgentRouter, and a NativeAOT Python bridge.
 
-The host runs stdio by default. Streamable HTTP is loopback-only and opt-in.
+The host starts stdio and loopback Streamable HTTP by default. HTTP prefers `127.0.0.1:3011` and falls back to another loopback port if that port is already in use.
 
 Protocol baseline: MCP 2025-11-25. The current implementation matrix lives in [docs/SPEC_COMPLIANCE.md](docs/SPEC_COMPLIANCE.md).
 
@@ -18,7 +18,7 @@ Protocol baseline: MCP 2025-11-25. The current implementation matrix lives in [d
 
 ## Architecture at a glance
 
-Solid arrows point from the owning project or boundary to the dependency it uses.
+Solid arrows point from the owning project or boundary to the dependency it uses. The host-side cluster explicitly includes the shared `MCPServer.Domain` model consumed by `MCPServer.Application`.
 
 ```mermaid
 flowchart LR
@@ -35,6 +35,7 @@ flowchart LR
         Sidecar["MCPServer.Host.Sidecar"]
         Infra["MCPServer.Infrastructure"]
         App["MCPServer.Application"]
+        Domain["MCPServer.Domain"]
         Ssh["MCPServer.Ssh"]
         SshTools["MCPServer.Tools.Ssh"]
     end
@@ -58,6 +59,7 @@ flowchart LR
     MainHost --> App
     Sidecar --> Ssh
     Infra --> App
+    App --> Domain
     SshTools --> Ssh
 
     ARHost --> ARInfra --> ARApp --> ARDom --> ARAbs
@@ -88,8 +90,6 @@ dotnet run --project .\MCPServer.Client.Console\MCPServer.Client.Console.csproj 
 HTTP host on loopback:
 
 ```powershell
-$env:McpTransport__Http__Enabled = 'true'
-$env:McpTransport__Http__Port = '3011'
 dotnet run --project .\MCPServer.Host\MCPServer.Host.csproj
 ```
 
