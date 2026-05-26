@@ -14,7 +14,7 @@ Provider-neutral execution seam:
 
 Host-side shared domain:
 - `MCPServer.Domain`
-- `MCPServer.Application` consumes the shared domain model
+- `MCPServer.Application` consumes the shared host-side domain model
 
 Client runtime and bridge:
 - `MCPServer.Client`

@@ -35,7 +35,7 @@ flowchart LR
         Sidecar["MCPServer.Host.Sidecar"]
         Infra["MCPServer.Infrastructure"]
         App["MCPServer.Application"]
-        Domain["MCPServer.Domain"]
+        Domain["MCPServer.Domain\n(host-side shared domain)"]
         Ssh["MCPServer.Ssh"]
         SshTools["MCPServer.Tools.Ssh"]
     end
