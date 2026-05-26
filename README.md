@@ -1,18 +1,18 @@
 # MCPServer
 
-MCPServer is a .NET 10 workspace for an MCP host, an SSH tool surface, AgentRouter, and a NativeAOT Python bridge.
+MCPServer is a .NET 10 workspace for an MCP host, SSH tooling, AgentRouter, and a NativeAOT Python bridge.
 
-The host runs stdio by default. Streamable HTTP is available on loopback when enabled explicitly.
+The host runs stdio by default. Streamable HTTP is loopback-only and opt-in.
 
-Protocol baseline: MCP 2025-11-25. See [docs/SPEC_COMPLIANCE.md](docs/SPEC_COMPLIANCE.md) for the current implementation matrix.
+Protocol baseline: MCP 2025-11-25. The current implementation matrix lives in [docs/SPEC_COMPLIANCE.md](docs/SPEC_COMPLIANCE.md).
 
-## What ships here
+## Workspace map
 
-- `MCPServer.Host` is the main MCP server host.
-- `MCPServer.Host.Sidecar` is a small CLI for sidecar-style host launches.
-- `MCPServer.Client.Console` is a local client for stdio or HTTP.
+- `MCPServer.Host` is the primary MCP server host.
+- `MCPServer.Host.Sidecar` is the sidecar entry point for host composition.
+- `MCPServer.Client.Console` is the local client for stdio and HTTP checks.
 - `MCPServer.AgentRouter.*` contains the AgentRouter contracts, application layer, infrastructure, and hosting composition.
-- `MCPServer.Ssh` and `MCPServer.Tools.Ssh` own SSH policy/runtime and MCP tool exposure.
+- `MCPServer.Ssh` and `MCPServer.Tools.Ssh` own SSH policy, runtime, and MCP tool exposure.
 - `python/` contains the `ctypes` wrapper for the NativeAOT bridge.
 - `scripts/Sync-PythonBridge.ps1` publishes the native bridge, syncs the Python package payload, and can build the wheel.
 
@@ -101,13 +101,13 @@ dotnet run --project .\MCPServer.Client.Console\MCPServer.Client.Console.csproj 
 
 ## Python bridge
 
-The NativeAOT Python bridge is published separately.
+The NativeAOT bridge ships separately.
 
 The release and install path starts from .NET, then syncs the native payload into the Python package and builds the wheel. See [docs/INSTALL.md](docs/INSTALL.md).
 
-If you only want the wrapper package layout, see [python/README.md](python/README.md).
+If you only need the wrapper package layout, see [python/README.md](python/README.md).
 
-## Where to read next
+## Read next
 
 - [docs/REPO_ARCHITECTURE.md](docs/REPO_ARCHITECTURE.md)
 - [docs/BUILD_AND_TEST.md](docs/BUILD_AND_TEST.md)
@@ -119,8 +119,8 @@ If you only want the wrapper package layout, see [python/README.md](python/READM
 
 ## Repository rules
 
-- `System.Text.Json` only
-- Autofac for composition
-- no MediatR
-- explicit boundaries over magic dispatch
-- fix the first real failure before chasing downstream metadata errors
+- `System.Text.Json` only.
+- Autofac for composition.
+- No MediatR.
+- Keep boundaries explicit.
+- Fix the first real failure before chasing downstream metadata errors.
