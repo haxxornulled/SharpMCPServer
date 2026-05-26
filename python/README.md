@@ -8,45 +8,14 @@ It stays intentionally small:
 - explicit native-library path resolution
 - no CLR bootstrap, no pythonnet, no direct C# object model exposure
 
-## Install
+## Install and release flow
 
-If you are consuming the Python wrapper from this repository directly:
+The canonical .NET-to-Python install instructions live in
+[docs/INSTALL.md](../docs/INSTALL.md). That document starts with the .NET
+build/publish path, then shows how to sync the NativeAOT bridge and install the
+resulting wheel.
 
-```bash
-pip install -e python
-```
-
-If you are vendoring it from Git, point pip at the `python/` subdirectory:
-
-```bash
-pip install "git+https://github.com/<your-org>/MCPServer.git#subdirectory=python"
-```
-
-## Sync the native library
-
-The native bridge is published separately and copied into the package-local
-`python/src/mcpserver_agentrouter_bridge/native/` folder by a checked-in helper
-script.
-
-```powershell
-pwsh ./scripts/Sync-PythonBridge.ps1
-```
-
-If you also want a distributable wheel, add `-BuildWheel` and the script will
-emit it into `python/dist/` after syncing the native library:
-
-```powershell
-pwsh ./scripts/Sync-PythonBridge.ps1 -BuildWheel
-```
-
-You can install that wheel directly from the `dist/` directory:
-
-```powershell
-$wheel = Get-ChildItem python/dist/*.whl | Select-Object -First 1
-python -m pip install --force-reinstall --no-deps $wheel.FullName
-```
-
-The wrapper will discover the copied native library automatically. You can still
+The wrapper will discover the copied native library automatically. You can also
 set the explicit override if you want to point at a different build:
 
 ```powershell
@@ -77,8 +46,5 @@ If you want the raw JSON boundary instead of Python dictionaries, use
 ## Smoke test
 
 If the native library has been synced into the package directory, you can run
-the smoke test directly:
-
-```bash
-python -m unittest discover -s python/tests -p "test_native_smoke.py"
-```
+the smoke test directly. The install guide shows the clean-directory version
+that exercises the installed wheel instead of the source tree.

@@ -39,14 +39,4 @@ Use `ctypes` or `cffi` to call the exported C ABI and free the returned UTF-8 bu
 
 The Python side should treat the response buffer as owned by the native bridge until it calls the free export.
 
-For a ready-made Python wrapper, see the standalone package under [`python/`](../python/). It exposes a thin `ctypes` client and expects the native library to be copied into the package-local `native/` folder by [`scripts/Sync-PythonBridge.ps1`](../scripts/Sync-PythonBridge.ps1).
-
-## Publish
-
-Publish the library as NativeAOT for the runtime identifier you need, for example:
-
-```powershell
-pwsh ./scripts/Sync-PythonBridge.ps1 -RuntimeIdentifier win-x64 -Configuration Release
-```
-
-If you only want the raw publish output, the native library lands under the project publish folder and can be copied manually into the Python package `native/` directory.
+For a ready-made Python wrapper, see the standalone package under [`python/`](../python/). The canonical .NET-to-Python install path for that package lives in [`docs/INSTALL.md`](../docs/INSTALL.md), and the native library is copied into the package-local `native/` folder by [`scripts/Sync-PythonBridge.ps1`](../scripts/Sync-PythonBridge.ps1).

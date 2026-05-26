@@ -28,6 +28,7 @@ dotnet run --project .\MCPServer.Host.Sidecar\MCPServer.Host.Sidecar.csproj -- -
 
 - `docs/REPO_ARCHITECTURE.md`
 - `docs/BUILD_AND_TEST.md`
+- `docs/INSTALL.md`
 - `docs/SSH_BOUNDARY.md`
 - `docs/AGENT_ROUTER_BOUNDARY.md`
 - `docs/KNOWN_DRIFT.md`
