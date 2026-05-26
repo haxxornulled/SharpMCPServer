@@ -18,7 +18,7 @@ Protocol baseline: MCP 2025-11-25. See [docs/SPEC_COMPLIANCE.md](docs/SPEC_COMPL
 
 ## Architecture at a glance
 
-Solid arrows show composition and dependency direction.
+Solid arrows point from the owning project or boundary to the dependency it uses.
 
 ```mermaid
 flowchart LR
@@ -60,7 +60,7 @@ flowchart LR
     Infra --> App
     SshTools --> Ssh
 
-    ARAbs --> ARDom --> ARApp --> ARInfra --> ARHost
+    ARHost --> ARInfra --> ARApp --> ARDom --> ARAbs
 ```
 
 ## Build and test

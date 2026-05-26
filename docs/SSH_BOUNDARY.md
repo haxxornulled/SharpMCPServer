@@ -24,6 +24,8 @@
 
 ## SSH flow at a glance
 
+Solid arrows point from the owning boundary to the component it depends on.
+
 ```mermaid
 flowchart LR
     SidecarCLI["MCPServer.Host.Sidecar"]

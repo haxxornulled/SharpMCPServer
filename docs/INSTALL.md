@@ -5,6 +5,8 @@ It is the canonical install flow for the NativeAOT AgentRouter bridge.
 
 ## Release path
 
+Solid arrows show the release path from repo root to a smoke-tested wheel.
+
 ```mermaid
 flowchart TD
     Start["Start at repo root"] --> Verify["1. Restore, build, and test the .NET solution"]
