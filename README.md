@@ -1,10 +1,20 @@
 # MCPServer
 
-MCPServer is a .NET 10 repository built around a stdio Model Context Protocol host, an SSH provider/tool-pack, a host-side sidecar CLI, and an evolving AgentRouter bounded context.
+MCPServer is a .NET 10 workspace for an MCP host, an SSH tool surface, AgentRouter, and a NativeAOT Python bridge.
 
-This README is intentionally short. Historical design notes that no longer matched the codebase were removed instead of being preserved as misleading documentation.
+The host runs stdio by default. Streamable HTTP is available on loopback when enabled explicitly.
 
-## Build
+## What ships here
+
+- `MCPServer.Host` is the main MCP server host.
+- `MCPServer.Host.Sidecar` is a small CLI for sidecar-style host launches.
+- `MCPServer.Client.Console` is a local client for stdio or HTTP.
+- `MCPServer.AgentRouter.*` contains the AgentRouter contracts, application layer, infrastructure, and hosting composition.
+- `MCPServer.Ssh` and `MCPServer.Tools.Ssh` own SSH policy/runtime and MCP tool exposure.
+- `python/` contains the `ctypes` wrapper for the NativeAOT bridge.
+- `scripts/Sync-PythonBridge.ps1` publishes the native bridge, syncs the Python package payload, and can build the wheel.
+
+## Build and test
 
 ```powershell
 dotnet restore .\MCPServer.slnx
@@ -12,26 +22,50 @@ dotnet build .\MCPServer.slnx -c Debug
 dotnet test .\MCPServer.slnx -c Debug
 ```
 
-## Main executable
+## Run the host
+
+Stdio host:
 
 ```powershell
 dotnet run --project .\MCPServer.Host\MCPServer.Host.csproj
 ```
 
-## Sidecar CLI
+Console against stdio:
 
 ```powershell
-dotnet run --project .\MCPServer.Host.Sidecar\MCPServer.Host.Sidecar.csproj -- --help
+dotnet run --project .\MCPServer.Client.Console\MCPServer.Client.Console.csproj -- --server-path dotnet --server-arg MCPServer.Host.dll --working-directory .\MCPServer.Host\bin\Debug\net10.0 --tool server.info
 ```
+
+HTTP host on loopback:
+
+```powershell
+$env:McpTransport__Http__Enabled = 'true'
+$env:McpTransport__Http__Port = '3011'
+dotnet run --project .\MCPServer.Host\MCPServer.Host.csproj
+```
+
+Console against HTTP:
+
+```powershell
+dotnet run --project .\MCPServer.Client.Console\MCPServer.Client.Console.csproj -- --endpoint http://127.0.0.1:3011/mcp/ --tool ssh.profiles.list
+```
+
+## Python bridge
+
+The NativeAOT Python bridge is published separately.
+
+The release and install path starts from .NET, then syncs the native payload into the Python package and builds the wheel. See [docs/INSTALL.md](docs/INSTALL.md).
+
+If you only want the wrapper package layout, see [python/README.md](python/README.md).
 
 ## Where to read next
 
-- `docs/REPO_ARCHITECTURE.md`
-- `docs/BUILD_AND_TEST.md`
-- `docs/INSTALL.md`
-- `docs/SSH_BOUNDARY.md`
-- `docs/AGENT_ROUTER_BOUNDARY.md`
-- `docs/KNOWN_DRIFT.md`
+- [docs/REPO_ARCHITECTURE.md](docs/REPO_ARCHITECTURE.md)
+- [docs/BUILD_AND_TEST.md](docs/BUILD_AND_TEST.md)
+- [docs/INSTALL.md](docs/INSTALL.md)
+- [docs/SSH_BOUNDARY.md](docs/SSH_BOUNDARY.md)
+- [docs/AGENT_ROUTER_BOUNDARY.md](docs/AGENT_ROUTER_BOUNDARY.md)
+- [docs/KNOWN_DRIFT.md](docs/KNOWN_DRIFT.md)
 
 ## Repository rules
 

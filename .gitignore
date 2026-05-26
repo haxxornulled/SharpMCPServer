@@ -29,6 +29,7 @@ packages/
 # OS/editor junk
 .DS_Store
 Thumbs.db
+agent-router.db
 
 # Python
 __pycache__/
