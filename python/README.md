@@ -32,6 +32,20 @@ script.
 pwsh ./scripts/Sync-PythonBridge.ps1
 ```
 
+If you also want a distributable wheel, add `-BuildWheel` and the script will
+emit it into `python/dist/` after syncing the native library:
+
+```powershell
+pwsh ./scripts/Sync-PythonBridge.ps1 -BuildWheel
+```
+
+You can install that wheel directly from the `dist/` directory:
+
+```powershell
+$wheel = Get-ChildItem python/dist/*.whl | Select-Object -First 1
+python -m pip install --force-reinstall --no-deps $wheel.FullName
+```
+
 The wrapper will discover the copied native library automatically. You can still
 set the explicit override if you want to point at a different build:
 

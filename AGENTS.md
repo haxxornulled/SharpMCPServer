@@ -57,4 +57,5 @@ Repository guidance for agentic changes in `MCPServer`.
 - When making changes, keep the implementation minimal but production-shaped.
 - When in doubt, preserve explicitness and make the boundary obvious in code.
 - For the NativeAOT Python bridge, export only boring C ABI entry points, require Python to free returned buffers through the matching export, and keep shutdown/lifecycle hooks explicit even if they are no-ops initially.
+- The Python bridge release flow should publish the NativeAOT library, sync the package-local native payload, build a platform wheel from the checked-in Python package, and validate that wheel from a clean working directory so we are testing the installed artifact, not just the source tree.
 - Keep the published native bridge copyable into the Python package-local `native/` directory through the checked-in sync script, and keep that directory gitignored except for sentinel files.

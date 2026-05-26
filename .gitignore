@@ -39,6 +39,7 @@ python/.venv/
 python/build/
 python/dist/
 python/*.egg-info/
+python/src/*.egg-info/
 
 # Local MCP runtime/operator data
 ssh-profiles.local.json
