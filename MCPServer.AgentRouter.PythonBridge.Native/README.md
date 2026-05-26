@@ -1,14 +1,17 @@
-# MCPServer AgentRouter Python Bridge
+# MCPServer AgentRouter Native Bridge
 
-This project publishes the AgentRouter bridge as a NativeAOT shared library with a tiny C ABI.
+This project publishes the AgentRouter bridge as a NativeAOT shared library
+with a small C ABI.
 
-## Exported functions
+## Exported ABI
 
 - `agent_router_run(byte* inputUtf8, int inputLength, byte** outputUtf8, int* outputLength) -> int`
 - `agent_router_free(byte* ptr) -> void`
 - `agent_router_shutdown() -> int`
 
-## JSON contract
+## Contract
+
+The bridge speaks JSON over UTF-8 bytes.
 
 Request:
 
@@ -33,10 +36,23 @@ Response:
 }
 ```
 
-## Python shape
+## Ownership
 
-Use `ctypes` or `cffi` to call the exported C ABI and free the returned UTF-8 buffer with `agent_router_free`.
+The native bridge owns the returned UTF-8 buffer until the caller releases it
+with `agent_router_free`.
 
-The Python side should treat the response buffer as owned by the native bridge until it calls the free export.
+Callers should treat the ABI as:
 
-For a ready-made Python wrapper, see the standalone package under [`python/`](../python/). The canonical .NET-to-Python install path for that package lives in [`docs/INSTALL.md`](../docs/INSTALL.md), and the native library is copied into the package-local `native/` folder by [`scripts/Sync-PythonBridge.ps1`](../scripts/Sync-PythonBridge.ps1).
+- UTF-8 bytes in
+- UTF-8 bytes out
+- integer status codes
+- explicit release of returned memory
+
+## Python
+
+Use `ctypes` or `cffi` to load the shared library from Python.
+
+For the Python wrapper, see [`python/`](../python/). The install and release
+flow lives in [`docs/INSTALL.md`](../docs/INSTALL.md), and the package-local
+native binary is synced by [`scripts/Sync-PythonBridge.ps1`](../scripts/Sync-PythonBridge.ps1).
+
