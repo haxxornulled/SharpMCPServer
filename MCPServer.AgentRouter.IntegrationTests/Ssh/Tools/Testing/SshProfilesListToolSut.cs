@@ -81,18 +81,18 @@ internal sealed class SshProfilesListToolSut
             _availableCredentials.Add(credentialReference);
         }
 
-        public ValueTask<string?> ResolveSecretAsync(string? environmentVariableName, CancellationToken cancellationToken)
+        public ValueTask<string?> ResolveSecretAsync(string? credentialReference, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return new ValueTask<string?>(environmentVariableName is { Length: > 0 } reference && _availableCredentials.Contains(reference)
+            return new ValueTask<string?>(credentialReference is { Length: > 0 } reference && _availableCredentials.Contains(reference)
                 ? "available-test-secret"
                 : null);
         }
 
-        public ValueTask<bool> HasSecretAsync(string? environmentVariableName, CancellationToken cancellationToken)
+        public ValueTask<bool> HasSecretAsync(string? credentialReference, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return new ValueTask<bool>(environmentVariableName is { Length: > 0 } reference && _availableCredentials.Contains(reference));
+            return new ValueTask<bool>(credentialReference is { Length: > 0 } reference && _availableCredentials.Contains(reference));
         }
     }
 

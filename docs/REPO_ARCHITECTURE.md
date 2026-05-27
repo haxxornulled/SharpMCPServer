@@ -20,6 +20,12 @@ Workspace editing and sandboxes:
 - `MCPServer.Workspace`
 - `MCPServer.Tools.Workspace`
 
+Provider-neutral inference:
+- `MCPServer.Inference.Abstractions`
+- `MCPServer.Inference.Application`
+- `MCPServer.Inference.Infrastructure`
+- `MCPServer.Tools.Inference`
+
 Client runtime and bridge:
 - `MCPServer.Client`
 - `MCPServer.Client.Infrastructure`
@@ -43,6 +49,8 @@ Composition/admin:
 - `MCPServer.AgentRouter.Ssh` does not exist.
 - Default/no-op router composition lives in `MCPServer.AgentRouter.Hosting`.
 - `MCPServer.Client` stays protocol-facing and reusable; browser launch, loopback auth flow, and other implementation details live in `MCPServer.Client.Infrastructure` or the composition root.
+- `MCPServer.Inference.Abstractions` is the neutral inference port used by AgentRouter and host composition; `MCPServer.Inference.Application` owns routing policy, and `MCPServer.Inference.Infrastructure` owns LMStudio, Ollama, and Anthropic adapters.
+- `MCPServer.Tools.Inference` owns the host-facing `inference.generate` MCP tool only.
 - `MCPServer.Workspace` owns workspace roots, sandbox persistence, and file policy; `MCPServer.Tools.Workspace` is the MCP adapter surface only.
 - Workspace sandboxes are persisted in SQLite and are transport-agnostic, so stdio and HTTP see the same state when they use the same database path.
 - SSH execution integration lives outside the AgentRouter namespace in `MCPServer.ExecutionPlugins.Ssh`.

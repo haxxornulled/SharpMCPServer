@@ -21,10 +21,10 @@ public sealed class DefaultSshPathResolver : ISshPathResolver
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        var expanded = Environment.ExpandEnvironmentVariables(path.Trim());
-        return Path.IsPathRooted(expanded)
-            ? Path.GetFullPath(expanded)
-            : ResolveContentPath(expanded);
+        var trimmed = path.Trim();
+        return Path.IsPathRooted(trimmed)
+            ? Path.GetFullPath(trimmed)
+            : ResolveContentPath(trimmed);
     }
 
     public string ResolveContentPath(string relativePath)

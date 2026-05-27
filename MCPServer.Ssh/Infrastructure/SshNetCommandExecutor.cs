@@ -194,7 +194,7 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
                 throw new InvalidOperationException($"Private key file was not found: {privateKeyPath}");
             }
 
-            var passphrase = await ResolveOptionalCredentialAsync(command.PrivateKeyPassphraseEnvironmentVariable, cancellationToken).ConfigureAwait(false);
+            var passphrase = await ResolveOptionalCredentialAsync(command.PrivateKeyPassphraseCredentialReference, cancellationToken).ConfigureAwait(false);
             var privateKeyFile = string.IsNullOrEmpty(passphrase)
                 ? new PrivateKeyFile(privateKeyPath)
                 : new PrivateKeyFile(privateKeyPath, passphrase);
@@ -208,7 +208,7 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
                 "private-key"));
         }
 
-        var password = await ResolveOptionalCredentialAsync(command.PasswordEnvironmentVariable, cancellationToken).ConfigureAwait(false);
+        var password = await ResolveOptionalCredentialAsync(command.PasswordCredentialReference, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrEmpty(password))
         {
             attempts.Add(new SshConnectionAttempt(
@@ -242,9 +242,9 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
             return $"SSH profile '{command.ProfileName}' has a privateKeyPath configured, but no usable authentication attempt could be created.";
         }
 
-        if (command.PasswordEnvironmentVariable is { Length: > 0 } variableName)
+        if (command.PasswordCredentialReference is { Length: > 0 } credentialReference)
         {
-            return $"SSH profile '{command.ProfileName}' uses credential reference '{variableName}', but no matching SQLite credential vault item or process environment fallback was found. Store the secret with the sidecar vault command or configure privateKeyPath. Raw credentials are not accepted in tool requests.";
+            return $"SSH profile '{command.ProfileName}' uses credential reference '{credentialReference}', but no matching SQLite credential vault item was found. Store the secret with the sidecar vault command or configure privateKeyPath. Raw credentials are not accepted in tool requests.";
         }
 
         return $"SSH profile '{command.ProfileName}' must configure privateKeyPath or a password credential reference. Raw credentials are not accepted in tool requests.";

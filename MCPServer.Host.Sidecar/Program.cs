@@ -92,7 +92,7 @@ internal static class SshHostSidecarConsole
         foreach (var entry in entries)
         {
             var description = string.IsNullOrWhiteSpace(entry.Description) ? string.Empty : $" - {entry.Description}";
-            Console.WriteLine($"{entry.Name} => {SshCredentialReference.BuildEnvironmentVariableName(entry.Name)}{description}");
+            Console.WriteLine($"{entry.Name} => {entry.CredentialReference}{description}");
         }
 
         return 0;
@@ -108,14 +108,20 @@ internal static class SshHostSidecarConsole
             ?? (options.Value("secret-file") is { } secretFile ? await File.ReadAllTextAsync(secretFile, cancellationToken).ConfigureAwait(false) : null)
             ?? ReadSecretFromConsole($"SSH secret for '{name}': ");
 
-        var entry = await runtime.Vault.UpsertEntryAsync(name, secret, options.Value("description"), cancellationToken).ConfigureAwait(false);
+        var entryResult = await runtime.Vault.UpsertEntryAsync(name, secret, options.Value("description"), cancellationToken).ConfigureAwait(false);
+        if (!TryGetValue(entryResult, out var entry, out var entryError))
+        {
+            Console.Error.WriteLine(entryError);
+            return 1;
+        }
+
         if (options.JsonOutput)
         {
             WriteVaultSetJson(entry);
             return 0;
         }
 
-        Console.WriteLine($"Saved SSH vault item '{entry.Name}' in the SQLite SSH store. Credential reference: {SshCredentialReference.BuildEnvironmentVariableName(entry.Name)}.");
+        Console.WriteLine($"Saved SSH vault item '{entry.Name}' in the SQLite SSH store. Credential reference: {entry.CredentialReference}.");
         return 0;
     }
 
@@ -206,7 +212,7 @@ internal static class SshHostSidecarConsole
             return 2;
         }
 
-        var vaultItem = options.Value("vault-item") ?? $"{profileName}-password";
+        var vaultItem = options.Value("vault-item") ?? SshCredentialReference.BuildProfileCredentialReference(profileName, "password");
         var password = await ReadSecretOptionAsync(
             options,
             "password",
@@ -214,24 +220,35 @@ internal static class SshHostSidecarConsole
             $"SSH password for profile '{profileName}': ",
             cancellationToken).ConfigureAwait(false);
 
-        await runtime.Vault.UpsertEntryAsync(
+        var passwordEntryResult = await runtime.Vault.UpsertEntryAsync(
                 vaultItem,
                 password,
                 options.Value("description") ?? $"Password for SSH profile '{profileName}'",
                 cancellationToken)
             .ConfigureAwait(false);
+        if (!TryGetValue(passwordEntryResult, out _, out var passwordEntryError))
+        {
+            Console.Error.WriteLine(passwordEntryError);
+            return 1;
+        }
 
         var request = CreateProfileRequestFromOptions(
             options,
+            profileName,
             host,
             username,
             passwordVaultItem: vaultItem,
             privateKeyPath: null,
             privateKeyPassphraseVaultItem: null);
 
-        var profile = replaceProfile
-            ? GetValue(await runtime.ProfileStore.ReplaceProfileAsync(profileName, request, cancellationToken).ConfigureAwait(false))
-            : GetValue(await runtime.ProfileStore.UpsertProfileAsync(profileName, request, cancellationToken).ConfigureAwait(false));
+        var profileResult = replaceProfile
+            ? await runtime.ProfileStore.ReplaceProfileAsync(profileName, request, cancellationToken).ConfigureAwait(false)
+            : await runtime.ProfileStore.UpsertProfileAsync(profileName, request, cancellationToken).ConfigureAwait(false);
+        if (!TryGetValue(profileResult, out var profile, out var profileError))
+        {
+            Console.Error.WriteLine(profileError);
+            return 1;
+        }
         if (options.JsonOutput)
         {
             WriteProfileUpsertJson(runtime.ProfileStorePath, profileName, profile);
@@ -240,7 +257,7 @@ internal static class SshHostSidecarConsole
 
         Console.WriteLine($"{(replaceProfile ? "Replaced" : "Saved")} SSH password profile '{profileName}'.");
         Console.WriteLine($"  profile file : {runtime.ProfileStorePath}");
-        Console.WriteLine($"  vault item   : {vaultItem} ({SshCredentialReference.BuildEnvironmentVariableName(vaultItem)})");
+        Console.WriteLine($"  credential reference : {vaultItem}");
         return 0;
     }
 
@@ -265,7 +282,7 @@ internal static class SshHostSidecarConsole
         string? passphraseVaultItem = null;
         if (options.HasValue("key-passphrase") || options.HasValue("key-passphrase-file") || options.BoolValue("prompt-key-passphrase") == true)
         {
-            passphraseVaultItem = options.Value("vault-item") ?? $"{profileName}-key-passphrase";
+            passphraseVaultItem = options.Value("vault-item") ?? SshCredentialReference.BuildProfileCredentialReference(profileName, "private-key-passphrase");
             var passphrase = await ReadSecretOptionAsync(
                 options,
                 "key-passphrase",
@@ -273,25 +290,36 @@ internal static class SshHostSidecarConsole
                 $"SSH private key passphrase for profile '{profileName}': ",
                 cancellationToken).ConfigureAwait(false);
 
-            await runtime.Vault.UpsertEntryAsync(
+            var passphraseEntryResult = await runtime.Vault.UpsertEntryAsync(
                     passphraseVaultItem,
                     passphrase,
                     options.Value("description") ?? $"Private key passphrase for SSH profile '{profileName}'",
                     cancellationToken)
                 .ConfigureAwait(false);
+            if (!TryGetValue(passphraseEntryResult, out _, out var passphraseEntryError))
+            {
+                Console.Error.WriteLine(passphraseEntryError);
+                return 1;
+            }
         }
 
         var request = CreateProfileRequestFromOptions(
             options,
+            profileName,
             host,
             username,
             passwordVaultItem: null,
             privateKeyPath: privateKeyPath,
             privateKeyPassphraseVaultItem: passphraseVaultItem);
 
-        var profile = replaceProfile
-            ? GetValue(await runtime.ProfileStore.ReplaceProfileAsync(profileName, request, cancellationToken).ConfigureAwait(false))
-            : GetValue(await runtime.ProfileStore.UpsertProfileAsync(profileName, request, cancellationToken).ConfigureAwait(false));
+        var profileResult = replaceProfile
+            ? await runtime.ProfileStore.ReplaceProfileAsync(profileName, request, cancellationToken).ConfigureAwait(false)
+            : await runtime.ProfileStore.UpsertProfileAsync(profileName, request, cancellationToken).ConfigureAwait(false);
+        if (!TryGetValue(profileResult, out var profile, out var profileError))
+        {
+            Console.Error.WriteLine(profileError);
+            return 1;
+        }
         if (options.JsonOutput)
         {
             WriteProfileUpsertJson(runtime.ProfileStorePath, profileName, profile);
@@ -303,7 +331,7 @@ internal static class SshHostSidecarConsole
         Console.WriteLine($"  key path     : {privateKeyPath}");
         if (!string.IsNullOrWhiteSpace(passphraseVaultItem))
         {
-            Console.WriteLine($"  passphrase   : {passphraseVaultItem} ({SshCredentialReference.BuildEnvironmentVariableName(passphraseVaultItem)})");
+            Console.WriteLine($"  credential reference : {passphraseVaultItem}");
         }
 
         return 0;
@@ -314,7 +342,14 @@ internal static class SshHostSidecarConsole
         SidecarOptions options,
         CancellationToken cancellationToken)
     {
-        var profiles = await LoadProfilesAsync(runtime.ProfileStore, cancellationToken).ConfigureAwait(false);
+        var catalogResult = await runtime.ProfileStore.LoadProfilesAsync(cancellationToken).ConfigureAwait(false);
+        if (!TryGetValue(catalogResult, out var catalog, out var catalogError))
+        {
+            Console.Error.WriteLine(catalogError);
+            return 1;
+        }
+
+        var profiles = catalog.Profiles;
         if (options.JsonOutput)
         {
             WriteProfileListJson(runtime.ProfileStorePath, profiles);
@@ -347,6 +382,7 @@ internal static class SshHostSidecarConsole
         var name = options.PositionalOrRequired("name", 0);
         var request = CreateProfileRequestFromOptions(
             options,
+            name,
             host: null,
             username: null,
             passwordVaultItem: null,
@@ -358,7 +394,13 @@ internal static class SshHostSidecarConsole
             return 2;
         }
 
-        var profile = await UpsertProfileAsync(runtime.ProfileStore, name, request, cancellationToken).ConfigureAwait(false);
+        var profileResult = await UpsertProfileAsync(runtime.ProfileStore, name, request, cancellationToken).ConfigureAwait(false);
+        if (!TryGetValue(profileResult, out var profile, out var profileError))
+        {
+            Console.Error.WriteLine(profileError);
+            return 1;
+        }
+
         if (options.JsonOutput)
         {
             WriteProfileUpsertJson(runtime.ProfileStorePath, name, profile);
@@ -377,6 +419,7 @@ internal static class SshHostSidecarConsole
         var name = options.PositionalOrRequired("name", 0);
         var request = CreateProfileRequestFromOptions(
             options,
+            name,
             host: RequiredOption(options, "host"),
             username: RequiredOption(options, "username"),
             passwordVaultItem: null,
@@ -389,7 +432,13 @@ internal static class SshHostSidecarConsole
             return 2;
         }
 
-        var profile = await ReplaceProfileAsync(runtime.ProfileStore, name, request, cancellationToken).ConfigureAwait(false);
+        var profileResult = await ReplaceProfileAsync(runtime.ProfileStore, name, request, cancellationToken).ConfigureAwait(false);
+        if (!TryGetValue(profileResult, out var profile, out var profileError))
+        {
+            Console.Error.WriteLine(profileError);
+            return 1;
+        }
+
         if (options.JsonOutput)
         {
             WriteProfileUpsertJson(runtime.ProfileStorePath, name, profile);
@@ -406,7 +455,13 @@ internal static class SshHostSidecarConsole
         CancellationToken cancellationToken)
     {
         var name = options.PositionalOrRequired("name", 0);
-        var deleted = await DeleteProfileAsync(runtime.ProfileStore, name, cancellationToken).ConfigureAwait(false);
+        var deletedResult = await DeleteProfileAsync(runtime.ProfileStore, name, cancellationToken).ConfigureAwait(false);
+        if (!TryGetValue(deletedResult, out var deleted, out var deletedError))
+        {
+            Console.Error.WriteLine(deletedError);
+            return 1;
+        }
+
         if (!deleted)
         {
             Console.Error.WriteLine($"No SSH profile named '{name}' was found.");
@@ -424,8 +479,14 @@ internal static class SshHostSidecarConsole
     {
         var profile = options.PositionalOrRequired("profile", 0);
         var item = options.PositionalOrRequired("vault-item", 1);
-        await LinkPasswordAsync(runtime.ProfileStore, profile, item, cancellationToken).ConfigureAwait(false);
-        Console.WriteLine($"Linked profile '{profile}' password to vault item '{item}' ({SshCredentialReference.BuildEnvironmentVariableName(item)}).");
+        var linkResult = await LinkPasswordAsync(runtime.ProfileStore, profile, item, cancellationToken).ConfigureAwait(false);
+        if (!TryGetValue(linkResult, out _, out var linkError))
+        {
+            Console.Error.WriteLine(linkError);
+            return 1;
+        }
+
+        Console.WriteLine($"Linked profile '{profile}' password to credential reference '{item}'.");
         return 0;
     }
 
@@ -436,8 +497,14 @@ internal static class SshHostSidecarConsole
     {
         var profile = options.PositionalOrRequired("profile", 0);
         var item = options.PositionalOrRequired("vault-item", 1);
-        await LinkPrivateKeyPassphraseAsync(runtime.ProfileStore, profile, item, cancellationToken).ConfigureAwait(false);
-        Console.WriteLine($"Linked profile '{profile}' private-key passphrase to vault item '{item}' ({SshCredentialReference.BuildEnvironmentVariableName(item)}).");
+        var linkResult = await LinkPrivateKeyPassphraseAsync(runtime.ProfileStore, profile, item, cancellationToken).ConfigureAwait(false);
+        if (!TryGetValue(linkResult, out _, out var linkError))
+        {
+            Console.Error.WriteLine(linkError);
+            return 1;
+        }
+
+        Console.WriteLine($"Linked profile '{profile}' private-key passphrase to credential reference '{item}'.");
         return 0;
     }
 
@@ -447,6 +514,7 @@ internal static class SshHostSidecarConsole
 
     private static SshProfileUpsertRequest CreateProfileRequestFromOptions(
         SidecarOptions options,
+        string? profileName,
         string? host,
         string? username,
         string? passwordVaultItem,
@@ -460,8 +528,8 @@ internal static class SshHostSidecarConsole
             Port = options.IntValue("port"),
             Username = username ?? options.Value("username"),
             PrivateKeyPath = privateKeyPath ?? options.Value("private-key-path"),
-            PasswordEnvironmentVariable = BuildCredentialReference(passwordVaultItem ?? options.Value("password-vault-item")),
-            PrivateKeyPassphraseEnvironmentVariable = BuildCredentialReference(privateKeyPassphraseVaultItem ?? options.Value("key-passphrase-vault-item")),
+            PasswordCredentialReference = BuildCredentialReference(passwordVaultItem ?? options.Value("password-vault-item")),
+            PrivateKeyPassphraseCredentialReference = BuildCredentialReference(privateKeyPassphraseVaultItem ?? options.Value("key-passphrase-vault-item")),
             HostKeySha256 = options.Value("host-key-sha256"),
             AcceptUnknownHostKey = options.BoolValue("accept-unknown-host-key"),
             WorkingDirectory = options.Value("working-directory"),
@@ -483,7 +551,14 @@ internal static class SshHostSidecarConsole
         bool? requestedAllowedRoot,
         CancellationToken cancellationToken)
     {
-        var existingProfiles = await LoadProfilesAsync(runtime.ProfileStore, cancellationToken).ConfigureAwait(false);
+        var catalogResult = await runtime.ProfileStore.LoadProfilesAsync(cancellationToken).ConfigureAwait(false);
+        if (!TryGetValue(catalogResult, out var catalog, out var catalogError))
+        {
+            Console.Error.WriteLine(catalogError);
+            return false;
+        }
+
+        var existingProfiles = catalog.Profiles;
         existingProfiles.TryGetValue(profileName, out var existingProfile);
 
         var effectiveUsername = string.IsNullOrWhiteSpace(requestedUsername) ? existingProfile?.Username : requestedUsername;
@@ -829,69 +904,66 @@ internal static class SshHostSidecarConsole
         SshHostSidecarRuntimeFactory.ResolveProfileStoreDisplayPath(pathResolver, settings);
 
 
-    private static async ValueTask<IReadOnlyDictionary<string, SshProfileDefinition>> LoadProfilesAsync(
+    private static ValueTask<Fin<SshProfileCatalog>> LoadProfilesAsync(
         ISshProfileManagementStore profileStore,
         CancellationToken cancellationToken)
     {
-        var catalog = GetValue(await profileStore.LoadProfilesAsync(cancellationToken).ConfigureAwait(false));
-        return catalog.Profiles;
+        return profileStore.LoadProfilesAsync(cancellationToken);
     }
 
-    private static async ValueTask<SshProfileDefinition> UpsertProfileAsync(
+    private static ValueTask<Fin<SshProfileDefinition>> UpsertProfileAsync(
         ISshProfileManagementStore profileStore,
         string name,
         SshProfileUpsertRequest request,
         CancellationToken cancellationToken)
     {
-        return GetValue(await profileStore.UpsertProfileAsync(name, request, cancellationToken).ConfigureAwait(false));
+        return profileStore.UpsertProfileAsync(name, request, cancellationToken);
     }
 
-    private static async ValueTask<SshProfileDefinition> ReplaceProfileAsync(
+    private static ValueTask<Fin<SshProfileDefinition>> ReplaceProfileAsync(
         ISshProfileManagementStore profileStore,
         string name,
         SshProfileUpsertRequest request,
         CancellationToken cancellationToken)
     {
-        return GetValue(await profileStore.ReplaceProfileAsync(name, request, cancellationToken).ConfigureAwait(false));
+        return profileStore.ReplaceProfileAsync(name, request, cancellationToken);
     }
 
-    private static async ValueTask<bool> DeleteProfileAsync(
+    private static ValueTask<Fin<bool>> DeleteProfileAsync(
         ISshProfileManagementStore profileStore,
         string name,
         CancellationToken cancellationToken)
     {
-        return GetValue(await profileStore.DeleteProfileAsync(name, cancellationToken).ConfigureAwait(false));
+        return profileStore.DeleteProfileAsync(name, cancellationToken);
     }
 
-    private static async ValueTask<SshProfileDefinition> LinkPasswordAsync(
+    private static ValueTask<Fin<SshProfileDefinition>> LinkPasswordAsync(
         ISshProfileManagementStore profileStore,
         string profileName,
         string vaultItemName,
         CancellationToken cancellationToken)
     {
-        return GetValue(await profileStore.LinkPasswordAsync(
+        return profileStore.LinkPasswordAsync(
             profileName,
-            SshCredentialReference.BuildEnvironmentVariableName(vaultItemName),
-            cancellationToken).ConfigureAwait(false));
+            vaultItemName,
+            cancellationToken);
     }
 
-    private static async ValueTask<SshProfileDefinition> LinkPrivateKeyPassphraseAsync(
+    private static ValueTask<Fin<SshProfileDefinition>> LinkPrivateKeyPassphraseAsync(
         ISshProfileManagementStore profileStore,
         string profileName,
         string vaultItemName,
         CancellationToken cancellationToken)
     {
-        return GetValue(await profileStore.LinkPrivateKeyPassphraseAsync(
+        return profileStore.LinkPrivateKeyPassphraseAsync(
             profileName,
-            SshCredentialReference.BuildEnvironmentVariableName(vaultItemName),
-            cancellationToken).ConfigureAwait(false));
+            vaultItemName,
+            cancellationToken);
     }
 
     private static string? BuildCredentialReference(string? vaultItemName)
     {
-        return string.IsNullOrWhiteSpace(vaultItemName)
-            ? null
-            : SshCredentialReference.BuildEnvironmentVariableName(vaultItemName);
+        return string.IsNullOrWhiteSpace(vaultItemName) ? null : vaultItemName.Trim();
     }
 
     private static string DefaultBasePath(SidecarOptions? options = null)
@@ -964,6 +1036,17 @@ internal static class SshHostSidecarConsole
             Fail: static error => throw new InvalidOperationException(error.Message));
     }
 
+    private static bool TryGetValue<T>(Fin<T> value, out T result, out string error)
+    {
+        var outcome = value.Match(
+            Succ: value => (true, value, string.Empty),
+            Fail: failure => (false, default!, failure.Message));
+
+        result = outcome.Item2;
+        error = outcome.Item3;
+        return outcome.Item1;
+    }
+
     private static string GetError<T>(Fin<T> value)
     {
         return value.Match(
@@ -1013,7 +1096,7 @@ internal static class SshHostSidecarConsole
             {
                 writer.WriteStartObject();
                 writer.WriteString("name", entry.Name);
-                writer.WriteString("environmentVariable", SshCredentialReference.BuildEnvironmentVariableName(entry.Name));
+                writer.WriteString("credentialReference", entry.CredentialReference);
                 if (!string.IsNullOrWhiteSpace(entry.Description))
                 {
                     writer.WriteString("description", entry.Description);
@@ -1039,7 +1122,7 @@ internal static class SshHostSidecarConsole
             writer.WriteStartObject();
             writer.WriteString("command", "vault set");
             writer.WriteString("name", entry.Name);
-            writer.WriteString("environmentVariable", SshCredentialReference.BuildEnvironmentVariableName(entry.Name));
+            writer.WriteString("credentialReference", entry.CredentialReference);
             if (!string.IsNullOrWhiteSpace(entry.Description))
             {
                 writer.WriteString("description", entry.Description);
@@ -1102,8 +1185,8 @@ internal static class SshHostSidecarConsole
         writer.WriteNumber("port", profile.Port);
         writer.WriteString("username", profile.Username);
         WriteOptionalString(writer, "privateKeyPath", profile.PrivateKeyPath);
-        WriteOptionalString(writer, "privateKeyPassphraseEnvironmentVariable", profile.PrivateKeyPassphraseEnvironmentVariable);
-        WriteOptionalString(writer, "passwordEnvironmentVariable", profile.PasswordEnvironmentVariable);
+        WriteOptionalString(writer, "privateKeyPassphraseCredentialReference", profile.PrivateKeyPassphraseCredentialReference);
+        WriteOptionalString(writer, "passwordCredentialReference", profile.PasswordCredentialReference);
         WriteOptionalString(writer, "hostKeySha256", profile.HostKeySha256);
         writer.WriteBoolean("acceptUnknownHostKey", profile.AcceptUnknownHostKey);
         WriteOptionalString(writer, "workingDirectory", profile.WorkingDirectory);
@@ -1283,7 +1366,7 @@ internal sealed class SidecarOptions
       --key-passphrase <secret>           Optional private-key passphrase.
       --key-passphrase-file <path>        Read private-key passphrase from file.
       --prompt-key-passphrase <true|false>
-      --vault-item <name>                 Override default generated vault item name.
+      --vault-item <name>                 Override the default generated credential reference.
     """;
 
     public static SidecarOptions Parse(string[] args)

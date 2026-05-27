@@ -5,21 +5,28 @@ It is the canonical install flow for the NativeAOT AgentRouter bridge.
 
 ## Release path
 
-Solid arrows show the release path from repo root to a smoke-tested wheel.
+Solid arrows show the .NET-first release path to a smoke-tested wheel. If you
+only need .NET validation, stop after step 1.
 
 ```mermaid
-flowchart TD
-    Start["Start at repo root"] --> Verify["1. Restore, build, and test the .NET solution"]
-    Verify -->|If you only need .NET validation| StopDotNet["Stop here"]
-    Verify --> Publish["2. Publish the NativeAOT bridge"]
-    Publish --> Sync["Run scripts/Sync-PythonBridge.ps1\ncopy the native payload into python/src/.../native/"]
-    Sync --> Wheel{"Build wheel?"}
-    Wheel -->|Yes| BuildWheel["Create a platform wheel in python/dist/"]
-    Wheel -->|No| SkipWheel["Skip wheel build\n(native payload already synced)"]
-    BuildWheel --> Install["3. Install the wheel into the target Python environment"]
-    SkipWheel --> Install
-    Install --> Smoke["4. Smoke test the installed wheel from a clean temp directory"]
-    Smoke --> Done["Release path complete"]
+flowchart LR
+    subgraph DotNet[".NET validation"]
+        Validate["1. Restore, build, and test"]
+    end
+
+    subgraph Native["NativeAOT bridge"]
+        Publish["2. Publish NativeAOT bridge"]
+        Sync["Sync native payload into `python/src/.../native/`"]
+        Package["Create wheel in `python/dist/`"]
+    end
+
+    subgraph Python["Python packaging"]
+        Install["3. Install wheel into Python"]
+        Smoke["4. Smoke test from a clean temp directory"]
+    end
+
+    Validate --> Publish --> Sync --> Package --> Install
+    Install --> Smoke --> Done["Release complete"]
 ```
 
 ## Expected environment
@@ -39,7 +46,7 @@ dotnet build .\MCPServer.slnx -c Debug
 dotnet test .\MCPServer.slnx -c Debug
 ```
 
-If you are only validating the .NET side, you can stop here.
+If you are only validating the .NET side, you can stop after step 1.
 
 ## 2. Publish the NativeAOT bridge and sync the Python package payload
 

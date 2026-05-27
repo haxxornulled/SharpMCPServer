@@ -10,19 +10,20 @@ namespace MCPServer.AgentRouter.IntegrationTests.Ssh.Credentials;
 public sealed class DefaultSshCredentialResolverTests
 {
     [Fact]
-    public async Task ResolveSecretAsync_Returns_Sqlite_Vault_Value_When_Reference_Is_Generated_Credential_Alias()
+    public async Task ResolveSecretAsync_Returns_Sqlite_Vault_Value_When_Reference_Is_Generated_Profile_Credential()
     {
         await using var temp = TempSshCredentialDatabase.Create();
         var vault = temp.CreateVault();
+        var credentialReference = SshCredentialReference.BuildProfileCredentialReference("dev-admin", "password");
         await vault.UpsertEntryAsync(
-            "dev-admin-password",
+            credentialReference,
             "from-sqlite",
             "Password for SSH profile 'dev-admin'",
             TestContext.Current.CancellationToken);
         var resolver = temp.CreateResolver();
 
         var secret = await resolver.ResolveSecretAsync(
-            "MCPSERVER_SSH_VAULT_DEV_ADMIN_PASSWORD",
+            credentialReference,
             TestContext.Current.CancellationToken);
 
         Assert.Equal("from-sqlite", secret);
@@ -34,50 +35,23 @@ public sealed class DefaultSshCredentialResolverTests
         await using var temp = TempSshCredentialDatabase.Create();
         var vault = temp.CreateVault();
         await vault.UpsertEntryAsync(
-            "dev-admin-password",
+            "ssh/profile/dev-admin/password",
             "from-item-name",
             null,
             TestContext.Current.CancellationToken);
         var resolver = temp.CreateResolver();
 
         var secret = await resolver.ResolveSecretAsync(
-            "dev-admin-password",
+            "ssh/profile/dev-admin/password",
             TestContext.Current.CancellationToken);
 
         Assert.Equal("from-item-name", secret);
     }
 
     [Fact]
-    public async Task ResolveSecretAsync_Prefers_Sqlite_Vault_Over_Process_Environment_Fallback()
+    public async Task ResolveSecretAsync_Does_Not_Fall_Back_To_Process_Environment()
     {
-        const string credentialReference = "MCPSERVER_SSH_VAULT_DEV_ADMIN_PASSWORD";
-        var originalValue = Environment.GetEnvironmentVariable(credentialReference);
-        try
-        {
-            Environment.SetEnvironmentVariable(credentialReference, "from-env");
-            await using var temp = TempSshCredentialDatabase.Create();
-            var vault = temp.CreateVault();
-            await vault.UpsertEntryAsync(
-                "dev-admin-password",
-                "from-sqlite",
-                null,
-                TestContext.Current.CancellationToken);
-            var resolver = temp.CreateResolver();
-
-            var secret = await resolver.ResolveSecretAsync(credentialReference, TestContext.Current.CancellationToken);
-
-            Assert.Equal("from-sqlite", secret);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(credentialReference, originalValue);
-        }
-    }
-
-    [Fact]
-    public async Task ResolveSecretAsync_Returns_Process_Environment_Value_As_Compatibility_Fallback()
-    {
-        const string credentialReference = "MCPSERVER_TEST_DIRECT_ENV_SECRET";
+        const string credentialReference = "ssh/profile/dev-admin/password";
         var originalValue = Environment.GetEnvironmentVariable(credentialReference);
         try
         {
@@ -87,7 +61,7 @@ public sealed class DefaultSshCredentialResolverTests
 
             var secret = await resolver.ResolveSecretAsync(credentialReference, TestContext.Current.CancellationToken);
 
-            Assert.Equal("from-env", secret);
+            Assert.Null(secret);
         }
         finally
         {
@@ -96,24 +70,15 @@ public sealed class DefaultSshCredentialResolverTests
     }
 
     [Fact]
-    public async Task HasSecretAsync_Returns_False_When_Secret_Is_Not_In_Sqlite_Or_Environment_Fallback()
+    public async Task HasSecretAsync_Returns_False_When_Secret_Is_Not_In_Sqlite()
     {
-        const string credentialReference = "MCPSERVER_SSH_VAULT_MISSING_PASSWORD";
-        var originalValue = Environment.GetEnvironmentVariable(credentialReference);
-        try
-        {
-            Environment.SetEnvironmentVariable(credentialReference, null);
-            await using var temp = TempSshCredentialDatabase.Create();
-            var resolver = temp.CreateResolver();
+        const string credentialReference = "ssh/profile/missing/password";
+        await using var temp = TempSshCredentialDatabase.Create();
+        var resolver = temp.CreateResolver();
 
-            var hasSecret = await resolver.HasSecretAsync(credentialReference, TestContext.Current.CancellationToken);
+        var hasSecret = await resolver.HasSecretAsync(credentialReference, TestContext.Current.CancellationToken);
 
-            Assert.False(hasSecret);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(credentialReference, originalValue);
-        }
+        Assert.False(hasSecret);
     }
 
     [Fact]
@@ -218,10 +183,9 @@ public sealed class DefaultSshCredentialResolverTests
 
         public string ResolveConfiguredPath(string path)
         {
-            var expanded = Environment.ExpandEnvironmentVariables(path);
-            return Path.IsPathRooted(expanded)
-                ? Path.GetFullPath(expanded)
-                : Path.GetFullPath(Path.Combine(_root, expanded));
+            return Path.IsPathRooted(path)
+                ? Path.GetFullPath(path)
+                : Path.GetFullPath(Path.Combine(_root, path));
         }
 
         public string ResolveContentPath(string relativePath)

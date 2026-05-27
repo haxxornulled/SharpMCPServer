@@ -3,10 +3,10 @@ namespace MCPServer.Ssh.Interfaces;
 public interface ISshCredentialResolver
 {
     ValueTask<string?> ResolveSecretAsync(
-        string? environmentVariableName,
+        string? credentialReference,
         CancellationToken cancellationToken);
 
     ValueTask<bool> HasSecretAsync(
-        string? environmentVariableName,
+        string? credentialReference,
         CancellationToken cancellationToken);
 }

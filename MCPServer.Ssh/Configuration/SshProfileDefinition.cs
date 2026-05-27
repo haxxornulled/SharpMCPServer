@@ -14,9 +14,9 @@ public sealed class SshProfileDefinition
 
     public string? PrivateKeyPath { get; init; }
 
-    public string? PrivateKeyPassphraseEnvironmentVariable { get; init; }
+    public string? PrivateKeyPassphraseCredentialReference { get; init; }
 
-    public string? PasswordEnvironmentVariable { get; init; }
+    public string? PasswordCredentialReference { get; init; }
 
     public string? HostKeySha256 { get; init; }
 

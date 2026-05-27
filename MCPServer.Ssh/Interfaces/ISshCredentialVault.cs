@@ -1,3 +1,4 @@
+using LanguageExt;
 using MCPServer.Ssh.Models;
 
 namespace MCPServer.Ssh.Interfaces;
@@ -6,7 +7,7 @@ public interface ISshCredentialVault
 {
     ValueTask<IReadOnlyList<SshCredentialVaultEntry>> ListEntriesAsync(CancellationToken cancellationToken);
 
-    ValueTask<SshCredentialVaultEntry> UpsertEntryAsync(
+    ValueTask<Fin<SshCredentialVaultEntry>> UpsertEntryAsync(
         string name,
         string secret,
         string? description,

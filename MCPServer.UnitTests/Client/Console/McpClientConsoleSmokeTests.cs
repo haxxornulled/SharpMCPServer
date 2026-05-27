@@ -139,6 +139,75 @@ public sealed class McpClientConsoleSmokeTests
         Assert.Contains("Tool returned a success result.", consoleResult.Stdout, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Console_Can_Select_Inference_Provider_With_Shortcut_Over_Stdio()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+        var hostDll = GetProjectOutputPath("MCPServer.Host", "MCPServer.Host.dll", configuration);
+        var consoleDll = GetProjectOutputPath("MCPServer.Client.Console", "MCPServer.Client.Console.dll", configuration);
+        var hostWorkingDirectory = Path.GetDirectoryName(hostDll) ?? throw new InvalidOperationException("Host output directory was not found.");
+        var consoleWorkingDirectory = Path.GetDirectoryName(consoleDll) ?? throw new InvalidOperationException("Console output directory was not found.");
+
+        var providerSelectionResult = await RunProcessAsync(
+            "dotnet",
+            [
+                consoleDll,
+                "--transport",
+                "stdio",
+                "--server-path",
+                "dotnet",
+                "--server-arg",
+                hostDll,
+                "--working-directory",
+                hostWorkingDirectory,
+                "--tool",
+                "inference.providers.list",
+                "--probe",
+                "--probe-timeout-ms",
+                "3000"
+            ],
+            consoleWorkingDirectory,
+            cancellationToken);
+
+        Assert.Equal(0, providerSelectionResult.ExitCode);
+        Assert.Contains("Calling tool: inference.providers.list", providerSelectionResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Tool returned a success result.", providerSelectionResult.Stdout, StringComparison.Ordinal);
+
+        var selectedProviderId = TrySelectReadyInferenceProvider(providerSelectionResult.Stdout);
+        if (selectedProviderId is null)
+        {
+            return;
+        }
+
+        var consoleResult = await RunProcessAsync(
+            "dotnet",
+            [
+                consoleDll,
+                "--transport",
+                "stdio",
+                "--server-path",
+                "dotnet",
+                "--server-arg",
+                hostDll,
+                "--working-directory",
+                hostWorkingDirectory,
+                "--tool",
+                "inference.generate",
+                "--arguments",
+                "{\"prompt\":\"Say hello in one sentence.\"}",
+                "--provider",
+                selectedProviderId
+            ],
+            consoleWorkingDirectory,
+            cancellationToken);
+
+        Assert.Equal(0, consoleResult.ExitCode);
+        Assert.Contains("Calling tool: inference.generate", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Tool returned a success result.", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains($"\"providerId\":\"{selectedProviderId}\"", consoleResult.Stdout, StringComparison.Ordinal);
+    }
+
     private static async Task WaitForHttpTransportAsync(int port, CancellationToken cancellationToken)
     {
         using var httpClient = new HttpClient
@@ -299,6 +368,67 @@ public sealed class McpClientConsoleSmokeTests
         }
 
         return path;
+    }
+
+    private static string? TrySelectReadyInferenceProvider(string stdout)
+    {
+        if (!TryGetStructuredContent(stdout, out var structuredContent))
+        {
+            return null;
+        }
+
+        if (!structuredContent.TryGetProperty("providers", out var providers) || providers.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var provider in providers.EnumerateArray())
+        {
+            if (!provider.TryGetProperty("status", out var statusProperty) || statusProperty.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            if (!string.Equals(statusProperty.GetString(), "ready", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!provider.TryGetProperty("providerId", out var providerIdProperty) || providerIdProperty.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var providerId = providerIdProperty.GetString();
+            if (!string.IsNullOrWhiteSpace(providerId))
+            {
+                return providerId;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryGetStructuredContent(string stdout, out JsonElement structuredContent)
+    {
+        structuredContent = default;
+
+        var marker = "Structured content:";
+        var markerIndex = stdout.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+        {
+            return false;
+        }
+
+        var json = stdout[(markerIndex + marker.Length)..].Trim();
+        if (json.Length == 0)
+        {
+            return false;
+        }
+
+        using var document = JsonDocument.Parse(json);
+        structuredContent = document.RootElement.Clone();
+        return true;
     }
 
     private sealed record ProcessResult(int ExitCode, string Stdout, string Stderr);

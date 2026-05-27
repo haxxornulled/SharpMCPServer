@@ -79,12 +79,12 @@ public sealed class SshProfilesListTool : IMcpTool
         var result = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         foreach (var profile in catalog.Profiles.Values)
         {
-            if (profile.PasswordEnvironmentVariable is { Length: > 0 } passwordReference)
+            if (profile.PasswordCredentialReference is { Length: > 0 } passwordReference)
             {
                 result[passwordReference] = await _credentialResolver.HasSecretAsync(passwordReference, cancellationToken).ConfigureAwait(false);
             }
 
-            if (profile.PrivateKeyPassphraseEnvironmentVariable is { Length: > 0 } passphraseReference)
+            if (profile.PrivateKeyPassphraseCredentialReference is { Length: > 0 } passphraseReference)
             {
                 result[passphraseReference] = await _credentialResolver.HasSecretAsync(passphraseReference, cancellationToken).ConfigureAwait(false);
             }
@@ -118,16 +118,16 @@ public sealed class SshProfilesListTool : IMcpTool
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["name", "displayName", "host", "port", "username", "credentialKind", "hasCredentialConfigured", "passwordEnvironmentVariableSet", "hostKeyPinned", "acceptUnknownHostKey", "allowAllCommands", "privileged", "allowedRoot", "allowedCommands", "allowedRemotePathPrefixes", "source"],
+                "required": ["name", "displayName", "host", "port", "username", "credentialKind", "hasCredentialConfigured", "passwordCredentialReferenceSet", "hostKeyPinned", "acceptUnknownHostKey", "allowAllCommands", "privileged", "allowedRoot", "allowedCommands", "allowedRemotePathPrefixes", "source"],
                 "properties": {
                   "name": { "type": "string" },
                   "displayName": { "type": "string" },
                   "host": { "type": "string" },
                   "port": { "type": "integer" },
                   "username": { "type": "string" },
-                  "credentialKind": { "type": "string", "enum": ["none", "private-key", "password-environment-variable", "multiple"] },
+                "credentialKind": { "type": "string", "enum": ["none", "private-key", "password-credential-reference", "multiple"] },
                   "hasCredentialConfigured": { "type": "boolean" },
-                  "passwordEnvironmentVariableSet": { "type": "boolean" },
+                  "passwordCredentialReferenceSet": { "type": "boolean" },
                   "hostKeyPinned": { "type": "boolean" },
                   "acceptUnknownHostKey": { "type": "boolean" },
                   "allowAllCommands": { "type": "boolean" },

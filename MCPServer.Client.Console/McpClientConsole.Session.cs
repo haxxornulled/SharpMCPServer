@@ -1,10 +1,14 @@
 using System.Text.Json;
+using MCPServer.Client.Interfaces;
 
 namespace MCPServer.Client.ConsoleApp;
 
 internal static partial class McpClientConsole
 {
-    private static async Task<int> RunConfiguredAsync(ConsoleOptions options, JsonElement? toolArguments, CancellationToken cancellationToken)
+    private static async Task<int> RunConfiguredAsync(
+        ConsoleOptions options,
+        CancellationToken cancellationToken,
+        Func<IMcpClientSession, Task<int>> sessionRunner)
     {
         McpClientConsoleOAuthScope? oauthScope = null;
         try
@@ -21,7 +25,7 @@ internal static partial class McpClientConsole
             }
 
             await using var sessionScope = McpClientConsoleResultHelpers.GetValue(sessionScopeResult);
-            return await McpClientConsoleSessionRunner.RunSessionAsync(sessionScope.Session, options, toolArguments, cancellationToken).ConfigureAwait(false);
+            return await sessionRunner(sessionScope.Session).ConfigureAwait(false);
         }
         finally
         {

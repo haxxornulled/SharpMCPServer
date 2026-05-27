@@ -14,6 +14,8 @@ Protocol baseline: MCP 2025-11-25. The current implementation matrix lives in [d
 - `MCPServer.Tools.Workspace` exposes the workspace MCP tool surface.
 - `MCPServer.Client.Console` is the local client for stdio and HTTP checks.
 - `MCPServer.AgentRouter.*` contains the AgentRouter contracts, application layer, infrastructure, and hosting composition.
+- `MCPServer.Inference.*` contains the provider-neutral inference port, routing policy, and provider adapters for LMStudio, Ollama, and Anthropic.
+- `MCPServer.Tools.Inference` exposes the `inference.generate` MCP tool for routing prompts through configured inference providers.
 - `MCPServer.Ssh` and `MCPServer.Tools.Ssh` own SSH policy, runtime, and MCP tool exposure.
 - `python/` contains the `ctypes` wrapper for the NativeAOT bridge.
 - `scripts/Sync-PythonBridge.ps1` publishes the native bridge, syncs the Python package payload, and can build the wheel.
@@ -52,6 +54,7 @@ flowchart LR
         Domain["MCPServer.Domain\n(host-side shared domain)"]
         Workspace["MCPServer.Workspace"]
         WorkspaceTools["MCPServer.Tools.Workspace"]
+        InfTools["MCPServer.Tools.Inference"]
 
         MainHost --> Infra
         Infra --> App
@@ -59,7 +62,9 @@ flowchart LR
         MainHost -.-> App
         MainHost --> Workspace
         MainHost --> WorkspaceTools
+        MainHost --> InfTools
         WorkspaceTools --> Workspace
+        InfTools --> InfAbs
     end
 
     subgraph SshBoundary["SSH boundary"]
@@ -69,6 +74,15 @@ flowchart LR
 
         Sidecar --> Ssh
         SshTools --> Ssh
+    end
+
+    subgraph InferenceBoundary["Inference boundary"]
+        InfApp["MCPServer.Inference.Application"]
+        InfInfra["MCPServer.Inference.Infrastructure"]
+        InfAbs["MCPServer.Inference.Abstractions"]
+
+        InfApp --> InfAbs
+        InfInfra --> InfAbs
     end
 
     subgraph RouterCore["AgentRouter core"]
@@ -85,6 +99,9 @@ flowchart LR
 
     Python --> Native
     Native --> ARApp
+    ARApp --> InfAbs
+    MainHost --> InfApp
+    MainHost --> InfInfra
 
     ARHost --> ARInfra --> ARApp --> ARDom --> ARAbs
 ```
@@ -122,6 +139,25 @@ Console against HTTP:
 ```powershell
 dotnet run --project .\MCPServer.Client.Console\MCPServer.Client.Console.csproj -- --endpoint http://127.0.0.1:3011/mcp/ --tool ssh.profiles.list
 ```
+
+Inference smoke:
+
+```powershell
+dotnet run --project .\MCPServer.Client.Console\MCPServer.Client.Console.csproj -- --server-path dotnet --server-arg MCPServer.Host.dll --working-directory .\MCPServer.Host\bin\Debug\net10.0 --tool inference.generate --arguments '{"prompt":"Say hello in one sentence.","providerId":"lmstudio"}'
+```
+
+Chat console:
+
+```powershell
+dotnet run --project .\MCPServer.Client.Console\MCPServer.Client.Console.csproj -- --server-path dotnet --server-arg MCPServer.Host.dll --working-directory .\MCPServer.Host\bin\Debug\net10.0 --chat --provider lmstudio
+```
+
+Inside chat mode, use `/prompt`, `/tools`, `/provider`, `/model`, `/system`, `/strategy`, and `/fallback` to inspect or change the active route without leaving the REPL.
+Use `/tool <name> [json]` to call any MCP tool from inside the chat loop, `/search` to use the workspace search tool, `/read`, `/write`, `/patch`, and `/edit` to reach the workspace file tools through MCP, `/compact [instructions]` to compress the transcript into retained context, and `/clear` as a friendlier alias for `/reset`.
+
+Use `inference.providers.list` first if you want to confirm which inference backends are enabled before you generate. Pass `{"probe":true}` when you want a live readiness ping instead of config-only listing, or use the console shortcut `--probe --probe-timeout-ms 3000` on `inference.providers.list` if you want the same thing without writing JSON by hand. For `inference.generate`, use `--provider lmstudio` or `--provider ollama` to inject `providerId` without typing it into the JSON payload yourself.
+
+Set `McpInference` in host configuration to point LMStudio or Ollama at the local endpoints you want to test.
 
 ## Python bridge
 

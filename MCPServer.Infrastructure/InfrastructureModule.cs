@@ -6,6 +6,7 @@ using MCPServer.Infrastructure.Mcp.Http.Authorization;
 using MCPServer.Infrastructure.Mcp.Http;
 using MCPServer.Infrastructure.Mcp.JsonRpc;
 using MCPServer.Infrastructure.Mcp.JsonSchema;
+using MCPServer.Infrastructure.Mcp;
 using MCPServer.Infrastructure.Mcp.Stdio;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -71,6 +72,8 @@ public sealed class InfrastructureModule : Module
             .SingleInstance();
 
         builder.RegisterType<StreamableHttpMcpSessionTransport>()
+            .As<IMcpClientFeatureInvoker>()
+            .As<IMcpTaskStatusNotifier>()
             .As<IStreamableHttpMcpSessionTransport>()
             .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
 
@@ -89,6 +92,11 @@ public sealed class InfrastructureModule : Module
         builder.RegisterType<StreamableHttpMcpServerService>()
             .As<IHostedService>()
             .SingleInstance();
+
+        builder.RegisterType<DelegatingMcpClientFeatureTransport>()
+            .As<IMcpClientFeatureInvoker>()
+            .As<IMcpTaskStatusNotifier>()
+            .InstancePerMatchingLifetimeScope(McpLifetimeScopeTags.Session);
 
         builder.RegisterType<StdioMcpServerService>()
             .As<IHostedService>()

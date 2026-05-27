@@ -7,5 +7,7 @@ public interface IStdioMcpClientFeatureTransport
 {
     void Attach(Stream output, IJsonRpcResponseSerializer serializer, SemaphoreSlim writeLock);
 
+    bool HasActiveConnection { get; }
+
     bool TryHandleResponse(JsonRpcMessage message);
 }

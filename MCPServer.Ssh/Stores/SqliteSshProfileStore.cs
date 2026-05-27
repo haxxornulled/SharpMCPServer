@@ -113,7 +113,7 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
     {
         return await LinkCredentialAsync(
             profileName,
-            request => new SshProfileUpsertRequest { PasswordEnvironmentVariable = credentialRef },
+            request => new SshProfileUpsertRequest { PasswordCredentialReference = credentialRef },
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -124,7 +124,7 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
     {
         return await LinkCredentialAsync(
             profileName,
-            request => new SshProfileUpsertRequest { PrivateKeyPassphraseEnvironmentVariable = credentialRef },
+            request => new SshProfileUpsertRequest { PrivateKeyPassphraseCredentialReference = credentialRef },
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -135,8 +135,8 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
             Succ: catalog => Fin.Succ<IReadOnlyList<string>>(catalog.Profiles.Values
                 .SelectMany(static profile => new[]
                 {
-                    profile.PasswordEnvironmentVariable,
-                    profile.PrivateKeyPassphraseEnvironmentVariable
+                    profile.PasswordCredentialReference,
+                    profile.PrivateKeyPassphraseCredentialReference
                 })
                 .Where(static value => !string.IsNullOrWhiteSpace(value))
                 .Select(static value => value!.Trim())
@@ -187,13 +187,44 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
             var databasePath = ResolveDatabasePath();
             await using var connection = await OpenInitializedConnectionAsync(databasePath, cancellationToken).ConfigureAwait(false);
 
-            var effectiveExisting = replace
-                ? null
-                : existing ?? await LoadProfileByNameAsync(connection, databasePath, key, cancellationToken).ConfigureAwait(false);
-            var profile = BuildProfile(key, request, effectiveExisting, replace);
-
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-            await UpsertProfileCoreAsync(connection, transaction, profile, cancellationToken).ConfigureAwait(false);
+
+            var effectiveExisting = replace
+                ? existing ?? await LoadProfileByNameAsync(connection, databasePath, key, cancellationToken).ConfigureAwait(false)
+                : existing ?? await LoadProfileByNameAsync(connection, databasePath, key, cancellationToken).ConfigureAwait(false);
+
+            if (replace && effectiveExisting is null)
+            {
+                return Fin.Fail<SshProfileDefinition>(LanguageExt.Common.Error.New($"SSH profile '{key}' was not found."));
+            }
+
+            var profile = BuildProfile(key, request, effectiveExisting, replace);
+            if (effectiveExisting is null)
+            {
+                try
+                {
+                    await InsertProfileCoreAsync(connection, transaction, profile, cancellationToken).ConfigureAwait(false);
+                }
+                catch (SqliteException ex) when (IsUniqueConstraintViolation(ex))
+                {
+                    effectiveExisting = await LoadProfileByNameAsync(connection, databasePath, key, cancellationToken).ConfigureAwait(false);
+                    profile = BuildProfile(key, request, effectiveExisting, replace: false);
+                    var updatedRows = await UpdateProfileCoreAsync(connection, transaction, profile, cancellationToken).ConfigureAwait(false);
+                    if (updatedRows == 0)
+                    {
+                        return Fin.Fail<SshProfileDefinition>(LanguageExt.Common.Error.New($"SSH profile '{key}' was removed before the update could complete."));
+                    }
+                }
+            }
+            else
+            {
+                var updatedRows = await UpdateProfileCoreAsync(connection, transaction, profile, cancellationToken).ConfigureAwait(false);
+                if (updatedRows == 0)
+                {
+                    return Fin.Fail<SshProfileDefinition>(LanguageExt.Common.Error.New($"SSH profile '{key}' was removed before the update could complete."));
+                }
+            }
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
             return Fin.Succ(profile);
@@ -275,8 +306,8 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
                 port INTEGER NOT NULL,
                 username TEXT NOT NULL,
                 private_key_path TEXT NULL,
-                private_key_passphrase_environment_variable TEXT NULL,
-                password_environment_variable TEXT NULL,
+                private_key_passphrase_credential_reference TEXT NULL,
+                password_credential_reference TEXT NULL,
                 host_key_sha256 TEXT NULL,
                 accept_unknown_host_key INTEGER NOT NULL,
                 working_directory TEXT NULL,
@@ -292,6 +323,7 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
         await CreateStringTableAsync(connection, "ssh_profile_allowed_commands", cancellationToken).ConfigureAwait(false);
         await CreateStringTableAsync(connection, "ssh_profile_denied_commands", cancellationToken).ConfigureAwait(false);
         await CreateStringTableAsync(connection, "ssh_profile_allowed_remote_path_prefixes", cancellationToken).ConfigureAwait(false);
+        await EnsureLegacySchemaMigrationAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 
     private static async ValueTask CreateStringTableAsync(
@@ -308,6 +340,71 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
                 FOREIGN KEY (profile_name) REFERENCES ssh_profiles(name) ON DELETE CASCADE
             );
             """, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask EnsureLegacySchemaMigrationAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(connection, "ssh_profiles", "private_key_passphrase_credential_reference", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "ssh_profiles", "password_credential_reference", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+
+        if (await HasColumnAsync(connection, "ssh_profiles", "private_key_passphrase_environment_variable", cancellationToken).ConfigureAwait(false))
+        {
+            await ExecuteNonQueryAsync(connection, null, """
+                UPDATE ssh_profiles
+                SET private_key_passphrase_credential_reference = COALESCE(private_key_passphrase_credential_reference, private_key_passphrase_environment_variable)
+                WHERE private_key_passphrase_credential_reference IS NULL;
+                """, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (await HasColumnAsync(connection, "ssh_profiles", "password_environment_variable", cancellationToken).ConfigureAwait(false))
+        {
+            await ExecuteNonQueryAsync(connection, null, """
+                UPDATE ssh_profiles
+                SET password_credential_reference = COALESCE(password_credential_reference, password_environment_variable)
+                WHERE password_credential_reference IS NULL;
+                """, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async ValueTask EnsureColumnAsync(
+        SqliteConnection connection,
+        string tableName,
+        string columnName,
+        string columnDefinition,
+        CancellationToken cancellationToken)
+    {
+        if (await HasColumnAsync(connection, tableName, columnName, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        await ExecuteNonQueryAsync(connection, null, $"""
+            ALTER TABLE {tableName}
+            ADD COLUMN {columnName} {columnDefinition};
+            """, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<bool> HasColumnAsync(
+        SqliteConnection connection,
+        string tableName,
+        string columnName,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({tableName});";
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static async ValueTask<IReadOnlyDictionary<string, SshProfileDefinition>> LoadProfilesFromDatabaseAsync(
@@ -330,8 +427,8 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
                 port,
                 username,
                 private_key_path,
-                private_key_passphrase_environment_variable,
-                password_environment_variable,
+                private_key_passphrase_credential_reference,
+                password_credential_reference,
                 host_key_sha256,
                 accept_unknown_host_key,
                 working_directory,
@@ -355,8 +452,8 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
                 Port = reader.GetInt32(3),
                 Username = reader.GetString(4),
                 PrivateKeyPath = ReadNullableString(reader, 5),
-                PrivateKeyPassphraseEnvironmentVariable = ReadNullableString(reader, 6),
-                PasswordEnvironmentVariable = ReadNullableString(reader, 7),
+                PrivateKeyPassphraseCredentialReference = ReadNullableString(reader, 6),
+                PasswordCredentialReference = ReadNullableString(reader, 7),
                 HostKeySha256 = ReadNullableString(reader, 8),
                 AcceptUnknownHostKey = ReadBoolean(reader, 9),
                 WorkingDirectory = ReadNullableString(reader, 10),
@@ -389,8 +486,8 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
                 port,
                 username,
                 private_key_path,
-                private_key_passphrase_environment_variable,
-                password_environment_variable,
+                private_key_passphrase_credential_reference,
+                password_credential_reference,
                 host_key_sha256,
                 accept_unknown_host_key,
                 working_directory,
@@ -421,8 +518,8 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
             Port = reader.GetInt32(3),
             Username = reader.GetString(4),
             PrivateKeyPath = ReadNullableString(reader, 5),
-            PrivateKeyPassphraseEnvironmentVariable = ReadNullableString(reader, 6),
-            PasswordEnvironmentVariable = ReadNullableString(reader, 7),
+            PrivateKeyPassphraseCredentialReference = ReadNullableString(reader, 6),
+            PasswordCredentialReference = ReadNullableString(reader, 7),
             HostKeySha256 = ReadNullableString(reader, 8),
             AcceptUnknownHostKey = ReadBoolean(reader, 9),
             WorkingDirectory = ReadNullableString(reader, 10),
@@ -497,7 +594,7 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
         return values.ToArray();
     }
 
-    private static async ValueTask UpsertProfileCoreAsync(
+    private static async ValueTask InsertProfileCoreAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         SshProfileDefinition profile,
@@ -514,8 +611,8 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
                 port,
                 username,
                 private_key_path,
-                private_key_passphrase_environment_variable,
-                password_environment_variable,
+                private_key_passphrase_credential_reference,
+                password_credential_reference,
                 host_key_sha256,
                 accept_unknown_host_key,
                 working_directory,
@@ -532,8 +629,8 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
                 $port,
                 $username,
                 $privateKeyPath,
-                $privateKeyPassphraseEnvironmentVariable,
-                $passwordEnvironmentVariable,
+                $privateKeyPassphraseCredentialReference,
+                $passwordCredentialReference,
                 $hostKeySha256,
                 $acceptUnknownHostKey,
                 $workingDirectory,
@@ -543,22 +640,7 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
                 $allowedRoot,
                 $now,
                 $now)
-            ON CONFLICT(name) DO UPDATE SET
-                display_name = excluded.display_name,
-                host = excluded.host,
-                port = excluded.port,
-                username = excluded.username,
-                private_key_path = excluded.private_key_path,
-                private_key_passphrase_environment_variable = excluded.private_key_passphrase_environment_variable,
-                password_environment_variable = excluded.password_environment_variable,
-                host_key_sha256 = excluded.host_key_sha256,
-                accept_unknown_host_key = excluded.accept_unknown_host_key,
-                working_directory = excluded.working_directory,
-                allow_sudo_command = excluded.allow_sudo_command,
-                allow_all_commands = excluded.allow_all_commands,
-                privileged = excluded.privileged,
-                allowed_root = excluded.allowed_root,
-                updated_at_utc = excluded.updated_at_utc;
+            ;
             """, cancellationToken,
             new SqliteParameterValue("$name", profile.Name.Trim()),
             new SqliteParameterValue("$displayName", displayName),
@@ -566,8 +648,8 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
             new SqliteParameterValue("$port", profile.Port <= 0 ? 22 : profile.Port),
             new SqliteParameterValue("$username", profile.Username.Trim()),
             new SqliteParameterValue("$privateKeyPath", NullIfWhiteSpace(profile.PrivateKeyPath)),
-            new SqliteParameterValue("$privateKeyPassphraseEnvironmentVariable", NullIfWhiteSpace(profile.PrivateKeyPassphraseEnvironmentVariable)),
-            new SqliteParameterValue("$passwordEnvironmentVariable", NullIfWhiteSpace(profile.PasswordEnvironmentVariable)),
+            new SqliteParameterValue("$privateKeyPassphraseCredentialReference", NullIfWhiteSpace(profile.PrivateKeyPassphraseCredentialReference)),
+            new SqliteParameterValue("$passwordCredentialReference", NullIfWhiteSpace(profile.PasswordCredentialReference)),
             new SqliteParameterValue("$hostKeySha256", NullIfWhiteSpace(profile.HostKeySha256)),
             new SqliteParameterValue("$acceptUnknownHostKey", profile.AcceptUnknownHostKey ? 1 : 0),
             new SqliteParameterValue("$workingDirectory", NullIfWhiteSpace(profile.WorkingDirectory)),
@@ -580,6 +662,61 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
         await ReplaceStringValuesAsync(connection, transaction, "ssh_profile_allowed_commands", profile.Name, profile.AllowedCommands, cancellationToken).ConfigureAwait(false);
         await ReplaceStringValuesAsync(connection, transaction, "ssh_profile_denied_commands", profile.Name, profile.DeniedCommands, cancellationToken).ConfigureAwait(false);
         await ReplaceStringValuesAsync(connection, transaction, "ssh_profile_allowed_remote_path_prefixes", profile.Name, profile.AllowedRemotePathPrefixes, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<int> UpdateProfileCoreAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        SshProfileDefinition profile,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow.ToString("O");
+        var displayName = string.IsNullOrWhiteSpace(profile.DisplayName) ? profile.Name : profile.DisplayName.Trim();
+
+        var affected = await ExecuteNonQueryAsync(connection, transaction, """
+            UPDATE ssh_profiles
+            SET display_name = $displayName,
+                host = $host,
+                port = $port,
+                username = $username,
+                private_key_path = $privateKeyPath,
+                private_key_passphrase_credential_reference = $privateKeyPassphraseCredentialReference,
+                password_credential_reference = $passwordCredentialReference,
+                host_key_sha256 = $hostKeySha256,
+                accept_unknown_host_key = $acceptUnknownHostKey,
+                working_directory = $workingDirectory,
+                allow_sudo_command = $allowSudoCommand,
+                allow_all_commands = $allowAllCommands,
+                privileged = $privileged,
+                allowed_root = $allowedRoot,
+                updated_at_utc = $now
+            WHERE name = $name COLLATE NOCASE;
+            """, cancellationToken,
+            new SqliteParameterValue("$name", profile.Name.Trim()),
+            new SqliteParameterValue("$displayName", displayName),
+            new SqliteParameterValue("$host", profile.Host.Trim()),
+            new SqliteParameterValue("$port", profile.Port <= 0 ? 22 : profile.Port),
+            new SqliteParameterValue("$username", profile.Username.Trim()),
+            new SqliteParameterValue("$privateKeyPath", NullIfWhiteSpace(profile.PrivateKeyPath)),
+            new SqliteParameterValue("$privateKeyPassphraseCredentialReference", NullIfWhiteSpace(profile.PrivateKeyPassphraseCredentialReference)),
+            new SqliteParameterValue("$passwordCredentialReference", NullIfWhiteSpace(profile.PasswordCredentialReference)),
+            new SqliteParameterValue("$hostKeySha256", NullIfWhiteSpace(profile.HostKeySha256)),
+            new SqliteParameterValue("$acceptUnknownHostKey", profile.AcceptUnknownHostKey ? 1 : 0),
+            new SqliteParameterValue("$workingDirectory", NullIfWhiteSpace(profile.WorkingDirectory)),
+            new SqliteParameterValue("$allowSudoCommand", profile.AllowSudoCommand ? 1 : 0),
+            new SqliteParameterValue("$allowAllCommands", profile.AllowAllCommands ? 1 : 0),
+            new SqliteParameterValue("$privileged", profile.Privileged ? 1 : 0),
+            new SqliteParameterValue("$allowedRoot", profile.AllowedRoot ? 1 : 0),
+            new SqliteParameterValue("$now", now)).ConfigureAwait(false);
+
+        if (affected > 0)
+        {
+            await ReplaceStringValuesAsync(connection, transaction, "ssh_profile_allowed_commands", profile.Name, profile.AllowedCommands, cancellationToken).ConfigureAwait(false);
+            await ReplaceStringValuesAsync(connection, transaction, "ssh_profile_denied_commands", profile.Name, profile.DeniedCommands, cancellationToken).ConfigureAwait(false);
+            await ReplaceStringValuesAsync(connection, transaction, "ssh_profile_allowed_remote_path_prefixes", profile.Name, profile.AllowedRemotePathPrefixes, cancellationToken).ConfigureAwait(false);
+        }
+
+        return affected;
     }
 
     private static async ValueTask ReplaceStringValuesAsync(
@@ -622,8 +759,8 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
             Port = request.Port ?? fallback?.Port ?? 22,
             Username = request.Username ?? fallback?.Username ?? string.Empty,
             PrivateKeyPath = request.PrivateKeyPath ?? fallback?.PrivateKeyPath,
-            PrivateKeyPassphraseEnvironmentVariable = request.PrivateKeyPassphraseEnvironmentVariable ?? fallback?.PrivateKeyPassphraseEnvironmentVariable,
-            PasswordEnvironmentVariable = request.PasswordEnvironmentVariable ?? fallback?.PasswordEnvironmentVariable,
+            PrivateKeyPassphraseCredentialReference = request.PrivateKeyPassphraseCredentialReference ?? fallback?.PrivateKeyPassphraseCredentialReference,
+            PasswordCredentialReference = request.PasswordCredentialReference ?? fallback?.PasswordCredentialReference,
             HostKeySha256 = request.HostKeySha256 ?? fallback?.HostKeySha256,
             AcceptUnknownHostKey = request.AcceptUnknownHostKey ?? fallback?.AcceptUnknownHostKey ?? false,
             WorkingDirectory = request.WorkingDirectory ?? fallback?.WorkingDirectory,
@@ -689,6 +826,12 @@ public sealed class SqliteSshProfileStore : ISshProfileManagementStore
     private static string? ReadNullableString(SqliteDataReader reader, int ordinal)
     {
         return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+    }
+
+    private static bool IsUniqueConstraintViolation(SqliteException ex)
+    {
+        return ex.SqliteErrorCode == 19 ||
+            ex.SqliteExtendedErrorCode is 1555 or 2067;
     }
 
     private static bool ReadBoolean(SqliteDataReader reader, int ordinal)
