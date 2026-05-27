@@ -17,8 +17,13 @@
     <ProjectReference Include="..\MCPServer.AgentRouter.Hosting\MCPServer.AgentRouter.Hosting.csproj" />
     <ProjectReference Include="..\MCPServer.ExecutionPlugins.Ssh\MCPServer.ExecutionPlugins.Ssh.csproj" />
     <ProjectReference Include="..\MCPServer.Application\MCPServer.Application.csproj" />
+    <ProjectReference Include="..\MCPServer.Inference.Application\MCPServer.Inference.Application.csproj" />
+    <ProjectReference Include="..\MCPServer.Inference.Infrastructure\MCPServer.Inference.Infrastructure.csproj" />
     <ProjectReference Include="..\MCPServer.Infrastructure\MCPServer.Infrastructure.csproj" />
+    <ProjectReference Include="..\MCPServer.Tools.Inference\MCPServer.Tools.Inference.csproj" />
     <ProjectReference Include="..\MCPServer.Tools.Ssh\MCPServer.Tools.Ssh.csproj" />
+    <ProjectReference Include="..\MCPServer.Tools.Workspace\MCPServer.Tools.Workspace.csproj" />
+    <ProjectReference Include="..\MCPServer.Workspace\MCPServer.Workspace.csproj" />
   </ItemGroup>
 
   <ItemGroup>

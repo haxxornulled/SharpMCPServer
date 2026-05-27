@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using MCPServer.Application.Mcp.Interfaces;
@@ -66,46 +67,93 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
             return;
         }
 
-        using var listener = new HttpListener();
+        HttpListener? listener = null;
+        try
+        {
+            listener = CreateListener(prefixes);
+            listener.Start();
+        }
+        catch (Exception ex) when (_options.Port == StreamableHttpMcpTransportOptions.DefaultLoopbackPort && IsAddressInUse(ex))
+        {
+            listener?.Close();
+            var fallbackPort = GetAvailableLoopbackPort();
+            prefixes = _options.GetListenerPrefixes(fallbackPort);
+            listener = CreateListener(prefixes);
+            listener.Start();
+            _logger.LogWarning("MCP Streamable HTTP transport port {Port} was unavailable. Falling back to loopback port {FallbackPort}.", _options.Port, fallbackPort);
+        }
+
+        try
+        {
+            using var cancellationRegistration = stoppingToken.Register(static state =>
+            {
+                if (state is HttpListener httpListener)
+                {
+                    try
+                    {
+                        httpListener.Stop();
+                    }
+                    catch
+                    {
+                    }
+                }
+            }, listener);
+
+            _logger.LogInformation("MCP Streamable HTTP transport started on {Prefixes}", string.Join(", ", prefixes));
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                HttpListenerContext? context;
+                try
+                {
+                    context = await listener.GetContextAsync().ConfigureAwait(false);
+                }
+                catch (HttpListenerException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (ObjectDisposedException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                _ = HandleContextAsync(context, stoppingToken);
+            }
+        }
+        finally
+        {
+            listener?.Close();
+        }
+    }
+
+    private static HttpListener CreateListener(IReadOnlyList<string> prefixes)
+    {
+        var listener = new HttpListener();
         foreach (var prefix in prefixes)
         {
             listener.Prefixes.Add(prefix);
         }
 
+        return listener;
+    }
+
+    private static bool IsAddressInUse(Exception ex)
+    {
+        return ex is HttpListenerException httpListenerException && httpListenerException.ErrorCode is 32 or 183 ||
+            ex is SocketException socketException && socketException.SocketErrorCode is SocketError.AddressAlreadyInUse or SocketError.AddressNotAvailable;
+    }
+
+    private static int GetAvailableLoopbackPort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
-        using var cancellationRegistration = stoppingToken.Register(static state =>
+        try
         {
-            if (state is HttpListener httpListener)
-            {
-                try
-                {
-                    httpListener.Stop();
-                }
-                catch
-                {
-                }
-            }
-        }, listener);
-
-        _logger.LogInformation("MCP Streamable HTTP transport started on {Prefixes}", string.Join(", ", prefixes));
-
-        while (!stoppingToken.IsCancellationRequested)
+            return ((IPEndPoint)listener.LocalEndpoint).Port;
+        }
+        finally
         {
-            HttpListenerContext? context;
-            try
-            {
-                context = await listener.GetContextAsync().ConfigureAwait(false);
-            }
-            catch (HttpListenerException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (ObjectDisposedException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-
-            _ = HandleContextAsync(context, stoppingToken);
+            listener.Stop();
         }
     }
 

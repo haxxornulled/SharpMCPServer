@@ -2,9 +2,11 @@ namespace MCPServer.Infrastructure.Mcp.Http;
 
 public sealed class StreamableHttpMcpTransportOptions
 {
-    public bool Enabled { get; init; }
+    public const int DefaultLoopbackPort = 3011;
 
-    public int Port { get; init; }
+    public bool Enabled { get; init; } = true;
+
+    public int Port { get; init; } = DefaultLoopbackPort;
 
     public string Path { get; init; } = "/mcp/";
 
@@ -20,12 +22,17 @@ public sealed class StreamableHttpMcpTransportOptions
 
     public IReadOnlyList<string> GetListenerPrefixes()
     {
+        return GetListenerPrefixes(Port);
+    }
+
+    public IReadOnlyList<string> GetListenerPrefixes(int port)
+    {
         if (!Enabled)
         {
             return Array.Empty<string>();
         }
 
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(Port);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(port);
 
         if (Authorization.Enabled)
         {
@@ -33,13 +40,13 @@ public sealed class StreamableHttpMcpTransportOptions
             {
                 return
                 [
-                    $"http://127.0.0.1:{Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}/",
-                    $"http://localhost:{Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}/",
-                    $"http://[::1]:{Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}/"
+                    $"http://127.0.0.1:{port.ToString(System.Globalization.CultureInfo.InvariantCulture)}/",
+                    $"http://localhost:{port.ToString(System.Globalization.CultureInfo.InvariantCulture)}/",
+                    $"http://[::1]:{port.ToString(System.Globalization.CultureInfo.InvariantCulture)}/"
                 ];
             }
 
-            return [$"http://*:{Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}/"];
+            return [$"http://*:{port.ToString(System.Globalization.CultureInfo.InvariantCulture)}/"];
         }
 
         var normalizedPath = NormalizePath(Path);
@@ -47,13 +54,13 @@ public sealed class StreamableHttpMcpTransportOptions
         {
             return
             [
-                $"http://127.0.0.1:{Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}{normalizedPath}",
-                $"http://localhost:{Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}{normalizedPath}",
-                $"http://[::1]:{Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}{normalizedPath}"
+                $"http://127.0.0.1:{port.ToString(System.Globalization.CultureInfo.InvariantCulture)}{normalizedPath}",
+                $"http://localhost:{port.ToString(System.Globalization.CultureInfo.InvariantCulture)}{normalizedPath}",
+                $"http://[::1]:{port.ToString(System.Globalization.CultureInfo.InvariantCulture)}{normalizedPath}"
             ];
         }
 
-        return [$"http://*:{Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}{normalizedPath}"];
+        return [$"http://*:{port.ToString(System.Globalization.CultureInfo.InvariantCulture)}{normalizedPath}"];
     }
 
     public Uri GetLocalOrigin()

@@ -2,7 +2,7 @@ namespace MCPServer.Ssh.Models;
 
 public sealed record SshCredentialVaultEntry(
     string Name,
-    string EnvironmentVariable,
+    string CredentialReference,
     string? Description,
     DateTimeOffset CreatedUtc,
     DateTimeOffset UpdatedUtc);

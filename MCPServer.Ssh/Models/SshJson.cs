@@ -28,7 +28,7 @@ public static class SshJson
                 writer.WriteString("username", profile.Username);
                 writer.WriteString("credentialKind", GetCredentialKind(profile));
                 writer.WriteBoolean("hasCredentialConfigured", HasCredentialReference(profile));
-                writer.WriteBoolean("passwordEnvironmentVariableSet", IsPasswordCredentialAvailable(profile, credentialAvailability));
+                writer.WriteBoolean("passwordCredentialReferenceSet", IsPasswordCredentialAvailable(profile, credentialAvailability));
                 writer.WriteBoolean("hostKeyPinned", !string.IsNullOrWhiteSpace(profile.HostKeySha256));
                 writer.WriteBoolean("acceptUnknownHostKey", profile.AcceptUnknownHostKey);
                 writer.WriteBoolean("allowAllCommands", profile.AllowAllCommands);
@@ -177,13 +177,13 @@ public static class SshJson
     private static string GetCredentialKind(SshProfileDefinition profile)
     {
         var hasPrivateKey = !string.IsNullOrWhiteSpace(profile.PrivateKeyPath);
-        var hasPasswordEnvironmentVariable = !string.IsNullOrWhiteSpace(profile.PasswordEnvironmentVariable);
+        var hasPasswordCredentialReference = !string.IsNullOrWhiteSpace(profile.PasswordCredentialReference);
 
-        return (hasPrivateKey, hasPasswordEnvironmentVariable) switch
+        return (hasPrivateKey, hasPasswordCredentialReference) switch
         {
             (true, true) => "multiple",
             (true, false) => "private-key",
-            (false, true) => "password-environment-variable",
+            (false, true) => "password-credential-reference",
             _ => "none"
         };
     }
@@ -191,14 +191,14 @@ public static class SshJson
     private static bool HasCredentialReference(SshProfileDefinition profile)
     {
         return !string.IsNullOrWhiteSpace(profile.PrivateKeyPath) ||
-            !string.IsNullOrWhiteSpace(profile.PasswordEnvironmentVariable);
+            !string.IsNullOrWhiteSpace(profile.PasswordCredentialReference);
     }
 
     private static bool IsPasswordCredentialAvailable(
         SshProfileDefinition profile,
         IReadOnlyDictionary<string, bool>? credentialAvailability)
     {
-        return profile.PasswordEnvironmentVariable is { Length: > 0 } credentialReference &&
+        return profile.PasswordCredentialReference is { Length: > 0 } credentialReference &&
             credentialAvailability?.TryGetValue(credentialReference, out var available) == true &&
             available;
     }

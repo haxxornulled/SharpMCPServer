@@ -11,9 +11,16 @@
     <PackageReference Include="Autofac" />
     <ProjectReference Include="..\MCPServer.Application\MCPServer.Application.csproj" />
     <ProjectReference Include="..\MCPServer.Domain\MCPServer.Domain.csproj" />
+    <ProjectReference Include="..\MCPServer.Inference.Abstractions\MCPServer.Inference.Abstractions.csproj" />
+    <ProjectReference Include="..\MCPServer.Inference.Application\MCPServer.Inference.Application.csproj" />
+    <ProjectReference Include="..\MCPServer.Inference.Infrastructure\MCPServer.Inference.Infrastructure.csproj" />
+    <ProjectReference Include="..\MCPServer.Tools.Inference\MCPServer.Tools.Inference.csproj" />
     <ProjectReference Include="..\MCPServer.Infrastructure\MCPServer.Infrastructure.csproj" />
     <ProjectReference Include="..\MCPServer.Client.Infrastructure\MCPServer.Client.Infrastructure.csproj" />
     <ProjectReference Include="..\MCPServer.Client\MCPServer.Client.csproj" />
+    <ProjectReference Include="..\MCPServer.Client.Console\MCPServer.Client.Console.csproj" />
+    <ProjectReference Include="..\MCPServer.Tools.Workspace\MCPServer.Tools.Workspace.csproj" />
+    <ProjectReference Include="..\MCPServer.Workspace\MCPServer.Workspace.csproj" />
   </ItemGroup>
 
 </Project>

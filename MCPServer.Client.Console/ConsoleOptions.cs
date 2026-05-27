@@ -14,6 +14,12 @@ internal sealed class ConsoleOptions
 
     public string? ToolArgumentsJson { get; private init; }
 
+    public string? InferenceProviderId { get; private init; }
+
+    public bool ProbeInferenceProviders { get; private init; }
+
+    public int? ProbeInferenceProvidersTimeoutMilliseconds { get; private init; }
+
     public IReadOnlyList<string> ServerArguments { get; private init; } = Array.Empty<string>();
 
     public string? Origin { get; private init; }
@@ -54,6 +60,9 @@ internal sealed class ConsoleOptions
       --working-directory <dir> Optional server working directory for stdio mode.
       --tool <name>             Tool to call after initialization. Defaults to server.info.
       --arguments <json>        Tool arguments as a JSON object.
+      --provider <id>           Shortcut provider selection for inference.generate.
+      --probe                   Shortcut for inference.providers.list live readiness probing.
+      --probe-timeout-ms <ms>   Timeout in milliseconds for --probe.
       --server-arg <value>      Additional argument passed to the server process. Repeatable.
       --origin <origin>         Override HTTP Origin header in HTTP mode.
       --bearer-token <token>    Send a bearer token for HTTP mode.
@@ -74,6 +83,9 @@ internal sealed class ConsoleOptions
       MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0
       MCPServer.Client.Console --server-path .\MCPServer.Host.exe --tool ssh.profiles.list --arguments {}
       MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0 --demo-sampling --tool client.sample --arguments {"prompt":"Say hello in one sentence."}
+      MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0 --tool inference.providers.list
+      MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0 --tool inference.providers.list --probe --probe-timeout-ms 3000
+      MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0 --tool inference.generate --arguments {"prompt":"Say hello in one sentence."} --provider lmstudio
       MCPServer.Client.Console --endpoint http://127.0.0.1:3000/mcp/ --open-server-event-stream --tool server.info
       MCPServer.Client.Console --endpoint http://127.0.0.1:3000/mcp/ --oauth-interactive --oauth-client-id https://client.example.com/metadata.json --tool server.info
     """;
@@ -86,6 +98,9 @@ internal sealed class ConsoleOptions
         string? workingDirectory = null;
         string? toolName = null;
         string? toolArgumentsJson = null;
+        string? inferenceProviderId = null;
+        var probeInferenceProviders = false;
+        int? probeInferenceProvidersTimeoutMilliseconds = null;
         string? origin = null;
         string? bearerToken = null;
         string? oauthClientName = null;
@@ -126,6 +141,16 @@ internal sealed class ConsoleOptions
                     break;
                 case "--arguments":
                     toolArgumentsJson = ReadValue(args, ref i, arg);
+                    break;
+                case "--provider":
+                    inferenceProviderId = ReadValue(args, ref i, arg);
+                    break;
+                case "--probe":
+                    probeInferenceProviders = true;
+                    break;
+                case "--probe-timeout-ms":
+                    probeInferenceProvidersTimeoutMilliseconds = ReadRequiredPositiveInt32(args, ref i, arg);
+                    probeInferenceProviders = true;
                     break;
                 case "--server-arg":
                     serverArguments.Add(ReadValue(args, ref i, arg));
@@ -254,6 +279,12 @@ internal sealed class ConsoleOptions
             throw new ArgumentException("--server-arg can only be used with stdio transport.");
         }
 
+        if (!string.IsNullOrWhiteSpace(inferenceProviderId) &&
+            !string.Equals(toolName, "inference.generate", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("--provider can only be used with inference.generate.");
+        }
+
         if (!string.IsNullOrWhiteSpace(bearerToken) && hasOAuthOptions)
         {
             throw new ArgumentException("--bearer-token cannot be combined with OAuth interactive options.");
@@ -298,6 +329,9 @@ internal sealed class ConsoleOptions
             WorkingDirectory = workingDirectory,
             ToolName = toolName,
             ToolArgumentsJson = toolArgumentsJson,
+            InferenceProviderId = inferenceProviderId,
+            ProbeInferenceProviders = probeInferenceProviders,
+            ProbeInferenceProvidersTimeoutMilliseconds = probeInferenceProvidersTimeoutMilliseconds,
             ServerArguments = serverArguments,
             Origin = origin,
             BearerToken = bearerToken,
@@ -359,6 +393,17 @@ internal sealed class ConsoleOptions
 
         index++;
         return args[index];
+    }
+
+    private static int ReadRequiredPositiveInt32(string[] args, ref int index, string optionName)
+    {
+        var valueRaw = ReadValue(args, ref index, optionName);
+        if (!int.TryParse(valueRaw, out var value) || value <= 0)
+        {
+            throw new ArgumentException($"{optionName} requires a positive integer value.");
+        }
+
+        return value;
     }
 }
 

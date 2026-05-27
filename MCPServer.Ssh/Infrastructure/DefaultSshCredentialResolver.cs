@@ -44,10 +44,7 @@ public sealed class DefaultSshCredentialResolver : ISshCredentialResolver
         {
             _logger.LogWarning(ex, "Failed to resolve SSH credential reference {CredentialReference} from SQLite credential vault.", reference);
         }
-
-        // Compatibility fallback only. New SSH profiles should store credentials in the SQLite SSH credential vault.
-        var environmentValue = Environment.GetEnvironmentVariable(reference);
-        return string.IsNullOrEmpty(environmentValue) ? null : environmentValue;
+        return null;
     }
 
     public async ValueTask<bool> HasSecretAsync(

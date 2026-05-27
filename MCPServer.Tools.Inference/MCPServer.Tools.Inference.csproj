@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>MCPServer.Tools.Inference</PackageId>
+    <Title>MCPServer Inference MCP Tools</Title>
+    <Description>MCP tool adapter package for the provider-neutral inference router.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac" />
+    <PackageReference Include="LanguageExt.Core" />
+    <ProjectReference Include="..\MCPServer.Application\MCPServer.Application.csproj" />
+    <ProjectReference Include="..\MCPServer.Domain\MCPServer.Domain.csproj" />
+    <ProjectReference Include="..\MCPServer.Inference.Abstractions\MCPServer.Inference.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>MCPServer.Inference.Abstractions</PackageId>
+    <Title>MCPServer Inference Abstractions</Title>
+    <Description>Neutral inference contracts and DTOs for local and remote model providers.</Description>
+    <Authors>MCPServer</Authors>
+    <PackageTags>inference;llm;abstractions;lmstudio;ollama;anthropic</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LanguageExt.Core" />
+  </ItemGroup>
+</Project>

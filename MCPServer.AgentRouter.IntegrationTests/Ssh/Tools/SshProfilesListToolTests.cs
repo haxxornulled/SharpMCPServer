@@ -56,7 +56,7 @@ public sealed class SshProfilesListToolTests
     [Fact]
     public async Task ExecuteAsync_Returns_Credential_Diagnostics_For_Configured_Password_Credential_Reference()
     {
-        const string credentialReference = "MCPSERVER_SSH_VAULT_DEV_ADMIN_PASSWORD";
+        const string credentialReference = "ssh/profile/debian-root-lab/password";
 
         var sut = new SshProfilesListToolSut()
             .AddProfile(new SshProfileDefinition
@@ -66,7 +66,7 @@ public sealed class SshProfilesListToolTests
                 Host = "173.255.205.169",
                 Port = 22,
                 Username = "root",
-                PasswordEnvironmentVariable = credentialReference,
+                PasswordCredentialReference = credentialReference,
                 HostKeySha256 = "SHA256:Q7mMEDNG2w/v+PBa0ogNmW3ECGDGapU2NFgKRX5/5yI",
                 AllowAllCommands = true,
                 Privileged = true,
@@ -77,15 +77,15 @@ public sealed class SshProfilesListToolTests
         var result = await sut.ExecuteAsync(TestContext.Current.CancellationToken);
 
         var profile = SshProfilesListToolSut.SingleProfile(result);
-        Assert.Equal("password-environment-variable", profile.GetProperty("credentialKind").GetString());
+        Assert.Equal("password-credential-reference", profile.GetProperty("credentialKind").GetString());
         Assert.True(profile.GetProperty("hasCredentialConfigured").GetBoolean());
-        Assert.False(profile.GetProperty("passwordEnvironmentVariableSet").GetBoolean());
+        Assert.False(profile.GetProperty("passwordCredentialReferenceSet").GetBoolean());
     }
 
     [Fact]
     public async Task ExecuteAsync_Returns_Password_Credential_Available_When_Resolver_Can_Resolve_It()
     {
-        const string credentialReference = "MCPSERVER_SSH_VAULT_DEV_ADMIN_PASSWORD";
+        const string credentialReference = "ssh/profile/debian-root-lab/password";
 
         var sut = new SshProfilesListToolSut()
             .AddAvailableCredential(credentialReference)
@@ -95,7 +95,7 @@ public sealed class SshProfilesListToolTests
                 Host = "173.255.205.169",
                 Port = 22,
                 Username = "root",
-                PasswordEnvironmentVariable = credentialReference,
+                PasswordCredentialReference = credentialReference,
                 HostKeySha256 = "SHA256:Q7mMEDNG2w/v+PBa0ogNmW3ECGDGapU2NFgKRX5/5yI",
                 Source = "test"
             });
@@ -103,9 +103,9 @@ public sealed class SshProfilesListToolTests
         var result = await sut.ExecuteAsync(TestContext.Current.CancellationToken);
 
         var profile = SshProfilesListToolSut.SingleProfile(result);
-        Assert.Equal("password-environment-variable", profile.GetProperty("credentialKind").GetString());
+        Assert.Equal("password-credential-reference", profile.GetProperty("credentialKind").GetString());
         Assert.True(profile.GetProperty("hasCredentialConfigured").GetBoolean());
-        Assert.True(profile.GetProperty("passwordEnvironmentVariableSet").GetBoolean());
+        Assert.True(profile.GetProperty("passwordCredentialReferenceSet").GetBoolean());
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public sealed class SshProfilesListToolTests
         var profile = SshProfilesListToolSut.SingleProfile(result);
         Assert.Equal("none", profile.GetProperty("credentialKind").GetString());
         Assert.False(profile.GetProperty("hasCredentialConfigured").GetBoolean());
-        Assert.False(profile.GetProperty("passwordEnvironmentVariableSet").GetBoolean());
+        Assert.False(profile.GetProperty("passwordCredentialReferenceSet").GetBoolean());
     }
 
     [Fact]

@@ -41,7 +41,7 @@ public sealed class SqliteSshProfileStoreTests
                 Host = "192.168.1.50",
                 Port = 22,
                 Username = "james",
-                PasswordEnvironmentVariable = "MCPSERVER_SSH_VAULT_DEV_PASSWORD",
+                PasswordCredentialReference = "ssh/profile/dev/password",
                 AllowedCommands =
                 [
                     "dotnet",
@@ -60,9 +60,31 @@ public sealed class SqliteSshProfileStoreTests
         Assert.Equal("Dev Lab", profile.DisplayName);
         Assert.Equal("192.168.1.50", profile.Host);
         Assert.Equal("james", profile.Username);
-        Assert.Equal("MCPSERVER_SSH_VAULT_DEV_PASSWORD", profile.PasswordEnvironmentVariable);
+        Assert.Equal("ssh/profile/dev/password", profile.PasswordCredentialReference);
         Assert.Equal(new[] { "dotnet", "git" }, profile.AllowedCommands);
         Assert.StartsWith("sqlite:", profile.Source, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReplaceProfileAsync_Returns_Failure_When_Profile_Does_Not_Exist()
+    {
+        await using var temp = TempSshProfileStore.Create();
+        var sut = temp.CreateStore();
+
+        var result = await sut.ReplaceProfileAsync(
+            "missing",
+            new SshProfileUpsertRequest
+            {
+                Host = "192.168.1.50",
+                Username = "james"
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsFail);
+        var error = result.Match(
+            Succ: _ => string.Empty,
+            Fail: failure => failure.Message);
+        Assert.Contains("was not found", error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -183,10 +205,9 @@ public sealed class SqliteSshProfileStoreTests
 
         public string ResolveConfiguredPath(string path)
         {
-            var expanded = Environment.ExpandEnvironmentVariables(path);
-            return Path.IsPathRooted(expanded)
-                ? Path.GetFullPath(expanded)
-                : Path.GetFullPath(Path.Combine(_root, expanded));
+            return Path.IsPathRooted(path)
+                ? Path.GetFullPath(path)
+                : Path.GetFullPath(Path.Combine(_root, path));
         }
 
         public string ResolveContentPath(string relativePath)

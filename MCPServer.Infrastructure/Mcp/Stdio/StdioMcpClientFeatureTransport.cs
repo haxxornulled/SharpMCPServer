@@ -33,6 +33,8 @@ public sealed class StdioMcpClientFeatureTransport : IMcpClientFeatureInvoker, I
         _writeLock = writeLock;
     }
 
+    public bool HasActiveConnection => _output is not null && _serializer is not null && _writeLock is not null;
+
     public bool TryHandleResponse(JsonRpcMessage message)
     {
         if (!message.IsResponse || !message.HasId)

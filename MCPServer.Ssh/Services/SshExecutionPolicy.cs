@@ -154,8 +154,8 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
             TimeoutSeconds = timeoutSeconds,
             MaxOutputChars = Math.Max(1, settings.MaxOutputChars),
             PrivateKeyPath = profile.PrivateKeyPath,
-            PrivateKeyPassphraseEnvironmentVariable = profile.PrivateKeyPassphraseEnvironmentVariable,
-            PasswordEnvironmentVariable = profile.PasswordEnvironmentVariable,
+            PrivateKeyPassphraseCredentialReference = profile.PrivateKeyPassphraseCredentialReference,
+            PasswordCredentialReference = profile.PasswordCredentialReference,
             HostKeySha256 = profile.HostKeySha256,
             AcceptUnknownHostKey = profile.AcceptUnknownHostKey || settings.AllowUnknownHostKeys
         });

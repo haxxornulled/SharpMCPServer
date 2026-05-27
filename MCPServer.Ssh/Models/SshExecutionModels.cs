@@ -120,9 +120,9 @@ public sealed class SshExecutionPolicyDecision
 
     public string? PrivateKeyPath { get; init; }
 
-    public string? PrivateKeyPassphraseEnvironmentVariable { get; init; }
+    public string? PrivateKeyPassphraseCredentialReference { get; init; }
 
-    public string? PasswordEnvironmentVariable { get; init; }
+    public string? PasswordCredentialReference { get; init; }
 
     public string? HostKeySha256 { get; init; }
 
@@ -151,9 +151,9 @@ public sealed class SshExecutionCommand
 
     public string? PrivateKeyPath { get; init; }
 
-    public string? PrivateKeyPassphraseEnvironmentVariable { get; init; }
+    public string? PrivateKeyPassphraseCredentialReference { get; init; }
 
-    public string? PasswordEnvironmentVariable { get; init; }
+    public string? PasswordCredentialReference { get; init; }
 
     public string? HostKeySha256 { get; init; }
 

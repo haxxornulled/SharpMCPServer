@@ -79,8 +79,8 @@ public sealed class SshExecutionService : ISshExecutionService
             TimeoutSeconds = policy.TimeoutSeconds,
             MaxOutputChars = policy.MaxOutputChars,
             PrivateKeyPath = policy.PrivateKeyPath,
-            PrivateKeyPassphraseEnvironmentVariable = policy.PrivateKeyPassphraseEnvironmentVariable,
-            PasswordEnvironmentVariable = policy.PasswordEnvironmentVariable,
+            PrivateKeyPassphraseCredentialReference = policy.PrivateKeyPassphraseCredentialReference,
+            PasswordCredentialReference = policy.PasswordCredentialReference,
             HostKeySha256 = policy.HostKeySha256,
             AcceptUnknownHostKey = policy.AcceptUnknownHostKey,
             OperationKey = request.OperationKey

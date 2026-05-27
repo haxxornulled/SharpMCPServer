@@ -139,6 +139,44 @@ public sealed class McpClientConsoleSmokeTests
         Assert.Contains("Tool returned a success result.", consoleResult.Stdout, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Console_Can_Select_Inference_Provider_With_Shortcut_Over_Stdio()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+        var hostDll = GetProjectOutputPath("MCPServer.Host", "MCPServer.Host.dll", configuration);
+        var consoleDll = GetProjectOutputPath("MCPServer.Client.Console", "MCPServer.Client.Console.dll", configuration);
+        var hostWorkingDirectory = Path.GetDirectoryName(hostDll) ?? throw new InvalidOperationException("Host output directory was not found.");
+        var consoleWorkingDirectory = Path.GetDirectoryName(consoleDll) ?? throw new InvalidOperationException("Console output directory was not found.");
+
+        var consoleResult = await RunProcessAsync(
+            "dotnet",
+            [
+                consoleDll,
+                "--transport",
+                "stdio",
+                "--server-path",
+                "dotnet",
+                "--server-arg",
+                hostDll,
+                "--working-directory",
+                hostWorkingDirectory,
+                "--tool",
+                "inference.generate",
+                "--arguments",
+                "{\"prompt\":\"Say hello in one sentence.\"}",
+                "--provider",
+                "lmstudio"
+            ],
+            consoleWorkingDirectory,
+            cancellationToken);
+
+        Assert.Equal(0, consoleResult.ExitCode);
+        Assert.Contains("Calling tool: inference.generate", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Tool returned a success result.", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("\"providerId\":\"lmstudio\"", consoleResult.Stdout, StringComparison.Ordinal);
+    }
+
     private static async Task WaitForHttpTransportAsync(int port, CancellationToken cancellationToken)
     {
         using var httpClient = new HttpClient
