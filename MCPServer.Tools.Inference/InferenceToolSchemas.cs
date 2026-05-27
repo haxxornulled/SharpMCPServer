@@ -8,10 +8,31 @@ internal static class InferenceToolSchemas
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "required": ["prompt"],
+      "oneOf": [
+        {
+          "required": ["prompt"]
+        },
+        {
+          "required": ["messages"]
+        }
+      ],
       "properties": {
         "prompt": { "type": "string", "minLength": 1 },
         "systemPrompt": { "type": "string" },
+        "messages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["role", "content"],
+            "properties": {
+              "role": { "type": "string", "enum": ["system", "user", "assistant", "tool"] },
+              "content": { "type": "string", "minLength": 1 },
+              "name": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
         "providerId": { "type": "string", "minLength": 1 },
         "strategy": { "type": "string", "enum": ["PrimaryOnly", "PrimaryThenFallback", "FanOutCompare"] },
         "fallbackProviderIds": {

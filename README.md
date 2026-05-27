@@ -146,6 +146,15 @@ Inference smoke:
 dotnet run --project .\MCPServer.Client.Console\MCPServer.Client.Console.csproj -- --server-path dotnet --server-arg MCPServer.Host.dll --working-directory .\MCPServer.Host\bin\Debug\net10.0 --tool inference.generate --arguments '{"prompt":"Say hello in one sentence.","providerId":"lmstudio"}'
 ```
 
+Chat console:
+
+```powershell
+dotnet run --project .\MCPServer.Client.Console\MCPServer.Client.Console.csproj -- --server-path dotnet --server-arg MCPServer.Host.dll --working-directory .\MCPServer.Host\bin\Debug\net10.0 --chat --provider lmstudio
+```
+
+Inside chat mode, use `/prompt`, `/tools`, `/provider`, `/model`, `/system`, `/strategy`, and `/fallback` to inspect or change the active route without leaving the REPL.
+Use `/tool <name> [json]` to call any MCP tool from inside the chat loop, `/search` to use the workspace search tool, `/read`, `/write`, `/patch`, and `/edit` to reach the workspace file tools through MCP, `/compact [instructions]` to compress the transcript into retained context, and `/clear` as a friendlier alias for `/reset`.
+
 Use `inference.providers.list` first if you want to confirm which inference backends are enabled before you generate. Pass `{"probe":true}` when you want a live readiness ping instead of config-only listing, or use the console shortcut `--probe --probe-timeout-ms 3000` on `inference.providers.list` if you want the same thing without writing JSON by hand. For `inference.generate`, use `--provider lmstudio` or `--provider ollama` to inject `providerId` without typing it into the JSON payload yourself.
 
 Set `McpInference` in host configuration to point LMStudio or Ollama at the local endpoints you want to test.

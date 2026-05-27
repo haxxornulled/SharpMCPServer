@@ -15,6 +15,7 @@
     <ProjectReference Include="..\MCPServer.Client.Infrastructure\MCPServer.Client.Infrastructure.csproj" />
     <ProjectReference Include="..\MCPServer.Client\MCPServer.Client.csproj" />
     <ProjectReference Include="..\MCPServer.Domain\MCPServer.Domain.csproj" />
+    <ProjectReference Include="..\MCPServer.Inference.Abstractions\MCPServer.Inference.Abstractions.csproj" />
   </ItemGroup>
 
 </Project>

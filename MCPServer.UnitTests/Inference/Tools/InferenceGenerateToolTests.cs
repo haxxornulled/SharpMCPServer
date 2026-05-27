@@ -65,6 +65,55 @@ public sealed class InferenceGenerateToolTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RoutesMessages_And_ReturnsStructuredProviderMetadata()
+    {
+        var router = new FakeInferenceRouter(request =>
+        {
+            Assert.Equal(2, request.Messages.Count);
+            Assert.Equal(InferenceRole.System, request.Messages[0].Role);
+            Assert.Equal("You are concise.", request.Messages[0].Content);
+            Assert.Equal(InferenceRole.User, request.Messages[1].Role);
+            Assert.Equal("hello", request.Messages[1].Content);
+            return new InferenceResponse(
+                "ollama",
+                "gemma4:latest",
+                "hi there",
+                "stop",
+                new InferenceUsage(10, 4, 14),
+                new Dictionary<string, string>
+                {
+                    ["providerId"] = "ollama"
+                });
+        });
+
+        var tool = new InferenceGenerateTool(router);
+        using var argumentsDocument = JsonDocument.Parse("""
+        {
+          "messages": [
+            {"role": "system", "content": "You are concise."},
+            {"role": "user", "content": "hello"}
+          ],
+          "providerId": "ollama",
+          "model": "gemma4:latest"
+        }
+        """);
+        var arguments = argumentsDocument.RootElement.Clone();
+
+        var result = await tool.ExecuteAsync(arguments, CancellationToken.None);
+
+        Assert.True(result.IsSucc);
+
+        var toolResult = result.Match(
+            Succ: static value => value,
+            Fail: static error => throw new Xunit.Sdk.XunitException(error.Message));
+
+        Assert.False(toolResult.IsError);
+        var content = Assert.Single(toolResult.Content);
+        var textContent = Assert.IsType<TextToolContent>(content);
+        Assert.Equal("hi there", textContent.Text);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_Rejects_Missing_Prompt()
     {
         var tool = new InferenceGenerateTool(new FakeInferenceRouter(_ => throw new InvalidOperationException("not expected")));

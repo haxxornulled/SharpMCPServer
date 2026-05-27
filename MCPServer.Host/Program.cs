@@ -1,6 +1,7 @@
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using MCPServer.AgentRouter.Infrastructure.Options;
+using MCPServer.Host.Configuration;
 using MCPServer.Host.Composition;
 using MCPServer.Inference.Abstractions.Models;
 using MCPServer.Inference.Application.Options;
@@ -127,7 +128,6 @@ finally
 {
     await Log.CloseAndFlushAsync().ConfigureAwait(false);
 }
-
 
 static AgentRouterSqliteOptions ReadAgentRouterSqliteOptions(IConfiguration configuration)
 {
@@ -347,33 +347,4 @@ static List<McpWorkspaceRootOptions> ReadWorkspaceRoots(IConfigurationSection se
     }
 
     return roots;
-}
-
-internal sealed class StaticOptionsMonitor<T> : IOptionsMonitor<T>
-{
-    private readonly T _value;
-
-    public StaticOptionsMonitor(T value)
-    {
-        _value = value;
-    }
-
-    public T CurrentValue => _value;
-
-    public T Get(string? name) => _value;
-
-    public IDisposable OnChange(Action<T, string?> listener) => NoopDisposable.Instance;
-}
-
-internal sealed class NoopDisposable : IDisposable
-{
-    public static readonly NoopDisposable Instance = new();
-
-    private NoopDisposable()
-    {
-    }
-
-    public void Dispose()
-    {
-    }
 }

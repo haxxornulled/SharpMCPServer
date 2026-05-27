@@ -42,11 +42,13 @@ public sealed class InferenceGenerateTool : IMcpTool
             return Fin.Succ<ToolCallResult>(ToolCallResult.Text("inference.generate expects an arguments object.", isError: true));
         }
 
-        if (!TryReadString(supplied, "prompt"u8, out var prompt) || string.IsNullOrWhiteSpace(prompt))
+        var providedMessages = TryReadMessages(supplied, out var messagesError);
+        if (messagesError is not null)
         {
-            return Fin.Succ<ToolCallResult>(ToolCallResult.Text("inference.generate requires a string prompt.", isError: true));
+            return Fin.Succ<ToolCallResult>(ToolCallResult.Text(messagesError, isError: true));
         }
 
+        var prompt = TryReadOptionalString(supplied, "prompt"u8);
         var systemPrompt = TryReadOptionalString(supplied, "systemPrompt"u8);
         var model = TryReadOptionalString(supplied, "model"u8);
         var maxTokens = TryReadOptionalInt32(supplied, "maxTokens"u8);
@@ -63,6 +65,33 @@ public sealed class InferenceGenerateTool : IMcpTool
         }
         var fallbackProviderIds = TryReadStringArray(supplied, "fallbackProviderIds"u8);
 
+        IReadOnlyList<InferenceMessage> messages;
+        if (providedMessages is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(prompt) || !string.IsNullOrWhiteSpace(systemPrompt))
+            {
+                return Fin.Succ<ToolCallResult>(ToolCallResult.Text("inference.generate cannot combine messages with prompt or systemPrompt.", isError: true));
+            }
+
+            messages = providedMessages;
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                return Fin.Succ<ToolCallResult>(ToolCallResult.Text("inference.generate requires either a string prompt or a messages array.", isError: true));
+            }
+
+            var promptMessages = new List<InferenceMessage>();
+            if (!string.IsNullOrWhiteSpace(systemPrompt))
+            {
+                promptMessages.Add(new InferenceMessage(InferenceRole.System, systemPrompt));
+            }
+
+            promptMessages.Add(new InferenceMessage(InferenceRole.User, prompt));
+            messages = promptMessages;
+        }
+
         InferenceRoutingHint? routingHint = null;
         if (providerId is not null || strategy is not null || fallbackProviderIds.Count > 0)
         {
@@ -71,14 +100,6 @@ public sealed class InferenceGenerateTool : IMcpTool
                 providerId,
                 fallbackProviderIds.Count > 0 ? fallbackProviderIds : null);
         }
-
-        var messages = new List<InferenceMessage>();
-        if (!string.IsNullOrWhiteSpace(systemPrompt))
-        {
-            messages.Add(new InferenceMessage(InferenceRole.System, systemPrompt));
-        }
-
-        messages.Add(new InferenceMessage(InferenceRole.User, prompt));
 
         var request = new InferenceRequest(
             messages,
@@ -241,6 +262,63 @@ public sealed class InferenceGenerateTool : IMcpTool
         }
 
         return values;
+    }
+
+    private static List<InferenceMessage>? TryReadMessages(JsonElement element, out string? error)
+    {
+        error = null;
+
+        if (!element.TryGetProperty("messages"u8, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind != JsonValueKind.Array)
+        {
+            error = "inference.generate requires messages to be an array of objects.";
+            return null;
+        }
+
+        var messages = new List<InferenceMessage>();
+        foreach (var item in property.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                error = "inference.generate messages entries must be objects with role and content.";
+                return null;
+            }
+
+            var roleRaw = TryReadOptionalString(item, "role"u8);
+            if (string.IsNullOrWhiteSpace(roleRaw))
+            {
+                error = "inference.generate messages entries require a role.";
+                return null;
+            }
+
+            if (!Enum.TryParse<InferenceRole>(roleRaw.Trim(), ignoreCase: true, out var role))
+            {
+                error = $"Unsupported inference message role '{roleRaw}'.";
+                return null;
+            }
+
+            var content = TryReadOptionalString(item, "content"u8);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                error = "inference.generate messages entries require a string content value.";
+                return null;
+            }
+
+            var name = NormalizeOptionalString(TryReadOptionalString(item, "name"u8));
+            messages.Add(new InferenceMessage(role, content, name));
+        }
+
+        if (messages.Count == 0)
+        {
+            error = "inference.generate requires at least one message when messages is supplied.";
+            return null;
+        }
+
+        return messages;
     }
 
     private static InferenceRoutingStrategy? TryReadOptionalStrategy(JsonElement element, ReadOnlySpan<byte> propertyName)

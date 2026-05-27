@@ -14,7 +14,13 @@ internal sealed class ConsoleOptions
 
     public string? ToolArgumentsJson { get; private init; }
 
+    public bool ChatMode { get; private init; }
+
     public string? InferenceProviderId { get; private init; }
+
+    public string? InferenceModel { get; private init; }
+
+    public string? InferenceSystemPrompt { get; private init; }
 
     public bool ProbeInferenceProviders { get; private init; }
 
@@ -60,7 +66,10 @@ internal sealed class ConsoleOptions
       --working-directory <dir> Optional server working directory for stdio mode.
       --tool <name>             Tool to call after initialization. Defaults to server.info.
       --arguments <json>        Tool arguments as a JSON object.
+      --chat                    Enter interactive chat mode through inference.generate.
       --provider <id>           Shortcut provider selection for inference.generate.
+      --model <name>            Shortcut model selection for inference.generate or chat mode.
+      --system-prompt <text>    Shortcut system prompt for inference.generate or chat mode.
       --probe                   Shortcut for inference.providers.list live readiness probing.
       --probe-timeout-ms <ms>   Timeout in milliseconds for --probe.
       --server-arg <value>      Additional argument passed to the server process. Repeatable.
@@ -78,6 +87,7 @@ internal sealed class ConsoleOptions
       --open-server-event-stream  Open the MCP SSE stream in HTTP mode.
       --no-open-server-event-stream  Disable the MCP SSE stream in HTTP mode.
       --help                    Show this help.
+      Chat mode supports /help, /exit, /quit, /reset, /clear, /prompt, /tools, /tool, /search, /read, /write, /patch, /edit, /compact, /provider, /model, /system, /strategy, and /fallback inside the prompt.
 
     Examples:
       MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0
@@ -86,6 +96,7 @@ internal sealed class ConsoleOptions
       MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0 --tool inference.providers.list
       MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0 --tool inference.providers.list --probe --probe-timeout-ms 3000
       MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0 --tool inference.generate --arguments {"prompt":"Say hello in one sentence."} --provider lmstudio
+      MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0 --chat --provider lmstudio
       MCPServer.Client.Console --endpoint http://127.0.0.1:3000/mcp/ --open-server-event-stream --tool server.info
       MCPServer.Client.Console --endpoint http://127.0.0.1:3000/mcp/ --oauth-interactive --oauth-client-id https://client.example.com/metadata.json --tool server.info
     """;
@@ -98,7 +109,10 @@ internal sealed class ConsoleOptions
         string? workingDirectory = null;
         string? toolName = null;
         string? toolArgumentsJson = null;
+        var chatMode = false;
         string? inferenceProviderId = null;
+        string? inferenceModel = null;
+        string? inferenceSystemPrompt = null;
         var probeInferenceProviders = false;
         int? probeInferenceProvidersTimeoutMilliseconds = null;
         string? origin = null;
@@ -142,8 +156,17 @@ internal sealed class ConsoleOptions
                 case "--arguments":
                     toolArgumentsJson = ReadValue(args, ref i, arg);
                     break;
+                case "--chat":
+                    chatMode = true;
+                    break;
                 case "--provider":
                     inferenceProviderId = ReadValue(args, ref i, arg);
+                    break;
+                case "--model":
+                    inferenceModel = ReadValue(args, ref i, arg);
+                    break;
+                case "--system-prompt":
+                    inferenceSystemPrompt = ReadValue(args, ref i, arg);
                     break;
                 case "--probe":
                     probeInferenceProviders = true;
@@ -210,6 +233,7 @@ internal sealed class ConsoleOptions
         var transport = ParseTransportKind(transportRaw);
         var hasServerPath = !string.IsNullOrWhiteSpace(serverPath);
         var hasEndpoint = !string.IsNullOrWhiteSpace(endpointRaw);
+        var hasToolName = !string.IsNullOrWhiteSpace(toolName);
         var hasOAuthOptions =
             useOAuthInteractive ||
             !string.IsNullOrWhiteSpace(oauthClientName) ||
@@ -279,10 +303,32 @@ internal sealed class ConsoleOptions
             throw new ArgumentException("--server-arg can only be used with stdio transport.");
         }
 
-        if (!string.IsNullOrWhiteSpace(inferenceProviderId) &&
-            !string.Equals(toolName, "inference.generate", StringComparison.OrdinalIgnoreCase))
+        if (chatMode && hasToolName && !string.Equals(toolName, "inference.generate", StringComparison.OrdinalIgnoreCase))
         {
-            throw new ArgumentException("--provider can only be used with inference.generate.");
+            throw new ArgumentException("--chat cannot be combined with --tool except inference.generate.");
+        }
+
+        if (chatMode && !string.IsNullOrWhiteSpace(toolArgumentsJson))
+        {
+            throw new ArgumentException("--chat cannot be combined with --arguments.");
+        }
+
+        var inferenceGenerateMode = chatMode || string.Equals(toolName, "inference.generate", StringComparison.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(inferenceProviderId) &&
+            !inferenceGenerateMode)
+        {
+            throw new ArgumentException("--provider can only be used with inference.generate or --chat.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(inferenceModel) && !inferenceGenerateMode)
+        {
+            throw new ArgumentException("--model can only be used with inference.generate or --chat.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(inferenceSystemPrompt) && !inferenceGenerateMode)
+        {
+            throw new ArgumentException("--system-prompt can only be used with inference.generate or --chat.");
         }
 
         if (!string.IsNullOrWhiteSpace(bearerToken) && hasOAuthOptions)
@@ -329,7 +375,10 @@ internal sealed class ConsoleOptions
             WorkingDirectory = workingDirectory,
             ToolName = toolName,
             ToolArgumentsJson = toolArgumentsJson,
+            ChatMode = chatMode,
             InferenceProviderId = inferenceProviderId,
+            InferenceModel = inferenceModel,
+            InferenceSystemPrompt = inferenceSystemPrompt,
             ProbeInferenceProviders = probeInferenceProviders,
             ProbeInferenceProvidersTimeoutMilliseconds = probeInferenceProvidersTimeoutMilliseconds,
             ServerArguments = serverArguments,

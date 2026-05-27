@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MCPServer.Client.Interfaces;
 
 namespace MCPServer.Client.ConsoleApp;
 
@@ -15,6 +16,17 @@ internal static partial class McpClientConsole
         {
             Console.WriteLine(ConsoleOptions.HelpText);
             return 0;
+        }
+
+        if (options.ChatMode)
+        {
+            if (!string.IsNullOrWhiteSpace(options.ToolArgumentsJson))
+            {
+                Console.Error.WriteLine("--chat cannot be combined with --arguments.");
+                return 2;
+            }
+
+            return await RunChatConfiguredAsync(options, cancellationToken).ConfigureAwait(false);
         }
 
         var toolName = McpClientConsoleToolPresentation.GetToolName(options);
@@ -51,6 +63,9 @@ internal static partial class McpClientConsole
             toolArguments = generateArguments;
         }
 
-        return await RunConfiguredAsync(options, toolArguments, cancellationToken).ConfigureAwait(false);
+        return await RunConfiguredAsync(
+            options,
+            cancellationToken,
+            session => McpClientConsoleSessionRunner.RunSessionAsync(session, options, toolArguments, cancellationToken)).ConfigureAwait(false);
     }
 }
