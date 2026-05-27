@@ -40,7 +40,7 @@ print(response["message"])
     $stderrPath = Join-Path $SmokeDirectory 'wheel-smoke.stderr.log'
     Remove-Item $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
 
-    $process = Start-Process -FilePath python -ArgumentList @('-u', $smokeScriptPath) -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    $process = Start-Process -FilePath python -ArgumentList @('-u', ('"{0}"' -f $smokeScriptPath)) -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $nextHeartbeat = (Get-Date).AddSeconds(15)
 
