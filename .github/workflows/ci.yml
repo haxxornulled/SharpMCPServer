@@ -10,6 +10,8 @@ on:
 jobs:
   build-and-test:
     runs-on: windows-latest
+    env:
+      PYTHONUNBUFFERED: '1'
 
     steps:
       - name: Checkout
@@ -39,18 +41,20 @@ jobs:
 
       - name: Sync Python bridge
         shell: pwsh
+        timeout-minutes: 30
         run: .\scripts\Sync-PythonBridge.ps1 -Configuration Release -RuntimeIdentifier win-x64 -BuildWheel
 
       - name: Install Python wheel
         shell: pwsh
-        run: |
-          $wheel = Get-ChildItem .\python\dist\*.whl | Select-Object -First 1
-          python -m pip install --force-reinstall --no-deps $wheel.FullName
+        timeout-minutes: 10
+        run: .\scripts\Install-PythonWheel.ps1
 
       - name: Python wheel smoke test
         shell: pwsh
-        run: .\scripts\Smoke-PythonWheel.ps1
+        timeout-minutes: 10
+        run: .\scripts\Smoke-PythonWheel.ps1 -TimeoutSeconds 300
 
       - name: Python tests
         shell: pwsh
-        run: python -m unittest discover -s python\tests
+        timeout-minutes: 20
+        run: python -m unittest discover -s python\tests -v
