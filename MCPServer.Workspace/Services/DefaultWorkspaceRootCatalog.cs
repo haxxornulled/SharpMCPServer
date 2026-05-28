@@ -69,7 +69,7 @@ public sealed class DefaultWorkspaceRootCatalog : IWorkspaceRootCatalog
     private static WorkspaceRoot[] BuildRoots(McpWorkspaceOptions options)
     {
         var configuredRoots = options.Roots.Count == 0
-            ? [new McpWorkspaceRootOptions { Name = "workspace", Path = AppContext.BaseDirectory, AllowWrite = true }]
+            ? [new McpWorkspaceRootOptions { Name = "workspace", Path = WorkspaceRootPathResolver.ResolveDefaultWorkspaceRootPath(), AllowWrite = true }]
             : options.Roots;
 
         var roots = new WorkspaceRoot[configuredRoots.Count];

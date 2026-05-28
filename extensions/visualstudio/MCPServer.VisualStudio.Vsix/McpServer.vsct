@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
+  <Extern href="vsshlids.h" />
+
+  <Commands package="guidMcpServerPackage">
+    <Menus>
+      <Menu guid="guidMcpServerCommandSet" id="McpServerMenu" priority="0x700" type="Menu">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_EXTENSIONS" />
+        <Strings>
+          <ButtonText>MCPServer</ButtonText>
+        </Strings>
+      </Menu>
+    </Menus>
+    <Groups>
+      <Group guid="guidMcpServerCommandSet" id="McpServerMenuGroup" priority="0x0000">
+        <Parent guid="guidMcpServerCommandSet" id="McpServerMenu" />
+      </Group>
+    </Groups>
+    <Buttons>
+      <Button guid="guidMcpServerCommandSet" id="OpenChatConsole" priority="0x0100" type="Button">
+        <Parent guid="guidMcpServerCommandSet" id="McpServerMenuGroup" />
+        <Strings>
+          <ButtonText>Open Chat Console</ButtonText>
+          <CommandName>OpenChatConsole</CommandName>
+        </Strings>
+      </Button>
+      <Button guid="guidMcpServerCommandSet" id="OpenHost" priority="0x0101" type="Button">
+        <Parent guid="guidMcpServerCommandSet" id="McpServerMenuGroup" />
+        <Strings>
+          <ButtonText>Open Host</ButtonText>
+          <CommandName>OpenHost</CommandName>
+        </Strings>
+      </Button>
+      <Button guid="guidMcpServerCommandSet" id="OpenWorkspaceDashboard" priority="0x0102" type="Button">
+        <Parent guid="guidMcpServerCommandSet" id="McpServerMenuGroup" />
+        <Strings>
+          <ButtonText>Open Workspace Dashboard</ButtonText>
+          <CommandName>OpenWorkspaceDashboard</CommandName>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <Symbols>
+    <GuidSymbol name="guidMcpServerPackage" value="{5C9C9E5A-0F22-4C6B-9F0A-4B27F9CB8A01}" />
+    <GuidSymbol name="guidMcpServerCommandSet" value="{6D2D0C4F-6D58-4A71-A1AA-1D56F1BC5502}">
+      <IDSymbol name="McpServerMenu" value="0x0200" />
+      <IDSymbol name="McpServerMenuGroup" value="0x0201" />
+      <IDSymbol name="OpenChatConsole" value="0x0100" />
+      <IDSymbol name="OpenHost" value="0x0101" />
+      <IDSymbol name="OpenWorkspaceDashboard" value="0x0102" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

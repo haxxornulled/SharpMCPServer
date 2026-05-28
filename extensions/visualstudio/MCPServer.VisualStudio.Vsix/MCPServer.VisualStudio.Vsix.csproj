@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <UseWpf>true</UseWpf>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NeutralLanguage>en-US</NeutralLanguage>
+    <RootNamespace>MCPServer.VisualStudio.Vsix</RootNamespace>
+    <AssemblyName>MCPServer.VisualStudio.Vsix</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <GeneratePkgDefFile>true</GeneratePkgDefFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugSymbols>false</DebugSymbols>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LanguageExt.Core" VersionOverride="4.4.9" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.VisualStudio.SDK" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MCPServer.VisualStudio.Core\MCPServer.VisualStudio.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <VSCTCompile Include="McpServer.vsct" />
+    <None Include="source.extension.vsixmanifest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <SuppressFromVsix Include="Microsoft.VisualStudio.Extensibility.Editor.Contracts.dll" Visible="false" />
+    <SuppressFromVsix Include="Microsoft.VisualStudio.Linux.ConnectionManager.Store.dll" Visible="false" />
+    <SuppressFromVsix Include="System.Text.Encodings.Web.dll" Visible="false" />
+  </ItemGroup>
+</Project>

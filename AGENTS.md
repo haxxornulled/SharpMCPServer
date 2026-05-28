@@ -17,6 +17,14 @@ Repository guidance for agentic changes in `MCPServer`.
 - For Python or other non-.NET interop, keep the bridge in a dedicated NativeAOT shared library with a tiny C ABI, UTF-8 JSON in/out, explicit unmanaged ownership, and source-generated `System.Text.Json` contracts. Do not expose C# object graphs, Autofac, or host composition details across that boundary.
 - The Python consumer package for a NativeAOT bridge should be standard-library-first, use `ctypes` around the C ABI, resolve the native library explicitly or from a conventional package-local path, and stay free of `pythonnet` or CLR bootstrap tricks.
 
+## Visual Studio Extensions
+
+- Treat Visual Studio 2026 as a VS 2022-compatible extension host unless a task explicitly says otherwise. Prefer broad VSIX installation targets such as `[17.0,)` for supported editions instead of tight upper bounds.
+- Default to the classic VSSDK VSIX shell for serious IDE work: commands, menus, tool windows, solution/project integration, and other deep shell behavior.
+- Use `VisualStudio.Extensibility` only when its out-of-proc model is a clear fit for a narrow scenario. Do not assume it is the right default for broad or critical IDE integration.
+- Keep the VSIX host thin. Package classes, command handlers, and tool-window glue should orchestrate only; real behavior belongs in separate application, domain, and infrastructure assemblies.
+- Treat Visual Studio as a hostile plugin host. Keep explicit service registration, constructor injection, and clean boundaries so the extension remains maintainable even when the shell is brittle.
+
 ## Security
 
 - Treat approval and policy boundaries as first-class.

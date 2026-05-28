@@ -42,7 +42,9 @@ internal static class McpClientConsoleChatRunner
         var toolList = McpClientConsoleResultHelpers.GetValue(tools);
         PrintTools(output, toolList);
 
-        var state = ChatState.Create(options, toolList.Tools);
+        var workspaceContext = await LoadWorkspaceContextAsync(session, options, toolList.Tools, cancellationToken).ConfigureAwait(false);
+
+        var state = ChatState.Create(options, toolList.Tools, workspaceContext);
         PrintReadyBanner(output, state);
 
         while (!cancellationToken.IsCancellationRequested)
@@ -688,6 +690,11 @@ internal static class McpClientConsoleChatRunner
         output.WriteLine("Chat mode ready.");
         output.WriteLine("Type /help for commands. /prompt shows the transcript, /tools lists available tools, /tool calls any MCP tool, /read/write/edit touch workspace files, /compact compresses context, and /exit quits. Prefix a prompt with // to send a literal slash.");
         output.WriteLine($"Route: {state.PromptSummary}");
+        if (state.HasWorkspaceContext)
+        {
+            output.WriteLine($"Workspace: {state.WorkspaceBanner}");
+        }
+
         if (state.HasSystemPrompt)
         {
             output.WriteLine("System prompt: set");
@@ -999,13 +1006,177 @@ internal static class McpClientConsoleChatRunner
         return 1;
     }
 
+    private static async Task<WorkspaceContext> LoadWorkspaceContextAsync(
+        IMcpClientSession session,
+        ConsoleOptions options,
+        IReadOnlyList<McpToolDescriptor> availableTools,
+        CancellationToken cancellationToken)
+    {
+        var checkoutRoot = McpClientConsoleWorkspaceContextResolver.ResolveCheckoutRoot(options);
+        var serverWorkingDirectory = NormalizePathForDisplay(options.WorkingDirectory);
+        IReadOnlyList<WorkspaceRootSnapshot> rootSnapshots = [];
+        var status = string.Empty;
+
+        if (availableTools.Any(tool => string.Equals(tool.Name, "workspace.roots.list", StringComparison.OrdinalIgnoreCase)))
+        {
+            var rootsResult = await session.CallToolAsync("workspace.roots.list", null, cancellationToken).ConfigureAwait(false);
+            if (rootsResult.IsFail)
+            {
+                status = "workspace.roots.list could not be loaded.";
+            }
+            else
+            {
+                var rootsToolResult = McpClientConsoleResultHelpers.GetValue(rootsResult);
+                if (rootsToolResult.IsError)
+                {
+                    status = "workspace.roots.list returned an error.";
+                }
+                else if (!TryReadWorkspaceRoots(rootsToolResult.StructuredContent, out var snapshots))
+                {
+                    status = "workspace.roots.list returned no structured root data.";
+                }
+                else
+                {
+                    rootSnapshots = snapshots;
+                }
+            }
+        }
+        else
+        {
+            status = "workspace.roots.list is not available from this session.";
+        }
+
+        var primaryWorkspaceRoot = SelectPrimaryWorkspaceRoot(rootSnapshots, checkoutRoot, serverWorkingDirectory);
+        return new WorkspaceContext(checkoutRoot, serverWorkingDirectory, primaryWorkspaceRoot, rootSnapshots, status);
+    }
+
+    private static bool TryReadWorkspaceRoots(JsonElement? structuredContent, out IReadOnlyList<WorkspaceRootSnapshot> roots)
+    {
+        roots = [];
+
+        if (structuredContent is not { ValueKind: JsonValueKind.Object } rootObject)
+        {
+            return false;
+        }
+
+        if (!rootObject.TryGetProperty("roots", out var rootsProperty) || rootsProperty.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var snapshots = new List<WorkspaceRootSnapshot>();
+        foreach (var rootElement in rootsProperty.EnumerateArray())
+        {
+            if (rootElement.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            snapshots.Add(new WorkspaceRootSnapshot(
+                TryReadOptionalString(rootElement, "name") ?? "workspace",
+                TryReadOptionalString(rootElement, "path") ?? string.Empty,
+                TryReadOptionalString(rootElement, "kind") ?? "workspace",
+                TryGetBoolean(rootElement, "allowWrite"),
+                TryGetBoolean(rootElement, "exists"),
+                TryReadOptionalString(rootElement, "sourceRootName")));
+        }
+
+        roots = snapshots;
+        return true;
+    }
+
+    private static string NormalizePathForDisplay(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        return Path.GetFullPath(path.Trim());
+    }
+
+    internal static string ResolveCheckoutRoot(string startDirectory)
+    {
+        return McpClientConsoleWorkspaceContextResolver.ResolveCheckoutRoot(startDirectory);
+    }
+
+    private static WorkspaceRootSnapshot? SelectPrimaryWorkspaceRoot(
+        IReadOnlyList<WorkspaceRootSnapshot> roots,
+        string checkoutRoot,
+        string? serverWorkingDirectory)
+    {
+        if (roots.Count == 0)
+        {
+            return null;
+        }
+
+        var checkoutMatch = FindMatchingRoot(roots, checkoutRoot);
+        if (checkoutMatch is not null)
+        {
+            return checkoutMatch;
+        }
+
+        var serverWorkingDirectoryMatch = FindMatchingRoot(roots, serverWorkingDirectory);
+        if (serverWorkingDirectoryMatch is not null)
+        {
+            return serverWorkingDirectoryMatch;
+        }
+
+        var namedWorkspaceMatch = roots.FirstOrDefault(root => string.Equals(root.Name, "workspace", StringComparison.OrdinalIgnoreCase));
+        if (namedWorkspaceMatch is not null)
+        {
+            return namedWorkspaceMatch;
+        }
+
+        var writableWorkspaceMatch = roots.FirstOrDefault(root =>
+            string.Equals(root.Kind, "workspace", StringComparison.OrdinalIgnoreCase) &&
+            root.AllowWrite);
+        if (writableWorkspaceMatch is not null)
+        {
+            return writableWorkspaceMatch;
+        }
+
+        return roots[0];
+    }
+
+    private static WorkspaceRootSnapshot? FindMatchingRoot(IReadOnlyList<WorkspaceRootSnapshot> roots, string? candidatePath)
+    {
+        if (string.IsNullOrWhiteSpace(candidatePath))
+        {
+            return null;
+        }
+
+        var normalizedCandidatePath = Path.TrimEndingDirectorySeparator(NormalizePathForDisplay(candidatePath));
+        return roots.FirstOrDefault(root =>
+            string.Equals(
+                Path.TrimEndingDirectorySeparator(root.Path),
+                normalizedCandidatePath,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+    }
+
+    private static string? TryReadOptionalString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return property.GetString();
+    }
+
+    private static bool TryGetBoolean(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.True;
+    }
+
     private sealed class ChatState
     {
         private readonly List<InferenceMessage> _messages = [];
 
-        private ChatState(IReadOnlyList<McpToolDescriptor> availableTools)
+        private ChatState(IReadOnlyList<McpToolDescriptor> availableTools, WorkspaceContext? workspaceContext)
         {
             AvailableTools = availableTools;
+            WorkspaceContext = workspaceContext;
         }
 
         public string? ProviderId { get; private set; }
@@ -1015,6 +1186,8 @@ internal static class McpClientConsoleChatRunner
         public string? SystemPrompt { get; private set; }
 
         public string? ConversationSummary { get; private set; }
+
+        public WorkspaceContext? WorkspaceContext { get; private set; }
 
         public InferenceRoutingStrategy? RoutingStrategy { get; private set; }
 
@@ -1026,6 +1199,8 @@ internal static class McpClientConsoleChatRunner
 
         public bool HasSystemPrompt => !string.IsNullOrWhiteSpace(SystemPrompt);
 
+        public bool HasWorkspaceContext => WorkspaceContext is not null;
+
         public string ProviderLabel => string.IsNullOrWhiteSpace(ProviderId) ? "router default" : ProviderId;
 
         public string ModelLabel => string.IsNullOrWhiteSpace(Model) ? "provider default" : Model;
@@ -1036,13 +1211,17 @@ internal static class McpClientConsoleChatRunner
 
         public string SummaryLabel => string.IsNullOrWhiteSpace(ConversationSummary) ? "none" : "present";
 
-        public string PromptSummary => $"provider={ProviderLabel}, model={ModelLabel}, strategy={RoutingStrategyLabel}, fallback={FallbackLabel}, summary={SummaryLabel}";
+        public string WorkspaceLabel => WorkspaceContext is null ? "none" : "loaded";
+
+        public string WorkspaceBanner => WorkspaceContext?.BannerSummary ?? "unavailable";
+
+        public string PromptSummary => $"provider={ProviderLabel}, model={ModelLabel}, strategy={RoutingStrategyLabel}, fallback={FallbackLabel}, workspace={WorkspaceLabel}, summary={SummaryLabel}";
 
         public IReadOnlyList<InferenceMessage> Messages => _messages;
 
-        public static ChatState Create(ConsoleOptions options, IReadOnlyList<McpToolDescriptor> availableTools)
+        public static ChatState Create(ConsoleOptions options, IReadOnlyList<McpToolDescriptor> availableTools, WorkspaceContext? workspaceContext)
         {
-            var state = new ChatState(availableTools)
+            var state = new ChatState(availableTools, workspaceContext)
             {
                 ProviderId = NormalizeOptionalString(options.InferenceProviderId),
                 Model = NormalizeOptionalString(options.InferenceModel),
@@ -1056,11 +1235,13 @@ internal static class McpClientConsoleChatRunner
         public void SetProvider(string? providerId)
         {
             ProviderId = NormalizeOptionalString(providerId);
+            ResetConversation();
         }
 
         public void SetModel(string? model)
         {
             Model = NormalizeOptionalString(model);
+            ResetConversation();
         }
 
         public void SetSystemPrompt(string? systemPrompt)
@@ -1110,6 +1291,11 @@ internal static class McpClientConsoleChatRunner
         {
             _messages.Clear();
 
+            if (WorkspaceContext is not null)
+            {
+                _messages.Add(new InferenceMessage(InferenceRole.System, WorkspaceContext.SystemPrompt, "workspace-context"));
+            }
+
             if (!string.IsNullOrWhiteSpace(SystemPrompt))
             {
                 _messages.Add(new InferenceMessage(InferenceRole.System, SystemPrompt));
@@ -1141,4 +1327,119 @@ internal static class McpClientConsoleChatRunner
             return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
         }
     }
+
+    private sealed record WorkspaceContext(
+        string CheckoutRoot,
+        string ServerWorkingDirectory,
+        WorkspaceRootSnapshot? PrimaryWorkspaceRoot,
+        IReadOnlyList<WorkspaceRootSnapshot> Roots,
+        string Status)
+    {
+        public string SystemPrompt => BuildSystemPrompt();
+
+        public string BannerSummary => BuildBannerSummary();
+
+        private string BuildSystemPrompt()
+        {
+            var builder = new StringBuilder();
+            builder.AppendLine("Workspace context:");
+            builder.AppendLine($"  checkout root: {CheckoutRoot}");
+
+            if (!string.IsNullOrWhiteSpace(ServerWorkingDirectory))
+            {
+                builder.AppendLine($"  server working directory: {ServerWorkingDirectory}");
+            }
+
+            if (PrimaryWorkspaceRoot is not null)
+            {
+                builder.Append("  active workspace root: ");
+                builder.Append(PrimaryWorkspaceRoot.Name);
+                builder.Append(": ");
+                builder.Append(PrimaryWorkspaceRoot.Path);
+                builder.Append(" (");
+                builder.Append(PrimaryWorkspaceRoot.Kind);
+                builder.Append(PrimaryWorkspaceRoot.AllowWrite ? ", writable" : ", read-only");
+                builder.Append(PrimaryWorkspaceRoot.Exists ? ", exists" : ", missing");
+                if (!string.IsNullOrWhiteSpace(PrimaryWorkspaceRoot.SourceRootName))
+                {
+                    builder.Append(", source=");
+                    builder.Append(PrimaryWorkspaceRoot.SourceRootName);
+                }
+
+                builder.AppendLine(")");
+            }
+
+            if (Roots.Count == 0)
+            {
+                builder.AppendLine("  workspace roots: unavailable");
+            }
+            else
+            {
+                builder.AppendLine("  workspace roots:");
+                foreach (var root in Roots)
+                {
+                    builder.Append("    - ");
+                    builder.Append(root.Name);
+                    builder.Append(": ");
+                    builder.Append(root.Path);
+                    builder.Append(" (");
+                    builder.Append(root.Kind);
+                    builder.Append(root.AllowWrite ? ", writable" : ", read-only");
+                    builder.Append(root.Exists ? ", exists" : ", missing");
+                    if (!string.IsNullOrWhiteSpace(root.SourceRootName))
+                    {
+                        builder.Append(", source=");
+                        builder.Append(root.SourceRootName);
+                    }
+
+                    builder.AppendLine(")");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(Status))
+            {
+                builder.AppendLine($"  note: {Status}");
+            }
+
+            return builder.ToString().TrimEnd();
+        }
+
+        private string BuildBannerSummary()
+        {
+            var parts = new List<string>
+            {
+                $"checkout root={CheckoutRoot}"
+            };
+
+            if (!string.IsNullOrWhiteSpace(ServerWorkingDirectory))
+            {
+                parts.Add($"server working directory={ServerWorkingDirectory}");
+            }
+
+            if (PrimaryWorkspaceRoot is not null)
+            {
+                parts.Add($"active root={PrimaryWorkspaceRoot.Name}: {PrimaryWorkspaceRoot.Path}");
+            }
+
+            if (Roots.Count > 0)
+            {
+                parts.Add($"roots={string.Join(", ", Roots.Select(root => root.Name))}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(Status))
+            {
+                parts.Add($"note={Status}");
+            }
+
+            return string.Join("; ", parts);
+        }
+    }
+
+    private sealed record WorkspaceRootSnapshot(
+        string Name,
+        string Path,
+        string Kind,
+        bool AllowWrite,
+        bool Exists,
+        string? SourceRootName);
 }

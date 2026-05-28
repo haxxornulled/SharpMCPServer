@@ -2,6 +2,8 @@
 
 The workspace layer gives MCP clients a narrow file-editing surface without turning the server into a machine-wide filesystem API.
 
+This repository treats that workspace as the agent bubble: the host decides what is in-bounds, and all client, IDE, and sub-agent activity stays inside the roots and sandboxes the host exposes.
+
 ## What owns what
 
 - `MCPServer.Workspace` owns workspace roots, sandbox persistence, path resolution, and file policy.
@@ -24,6 +26,10 @@ The current tool set is intentionally small:
 
 That is enough for a VS extension or agent workspace to inspect roots, create a disposable sandbox, edit inside it, and tear it down again.
 
+When `McpWorkspace:Roots` is empty, the host auto-detects a checkout root by walking upward from `AppContext.BaseDirectory` until it finds a `.slnx`, `.sln`, or `.git` marker, then exposes that as the default `workspace` root.
+
+When the client is launched through an IDE profile, the console can also seed `MCP_WORKSPACE_ROOT` from launch settings so the host sees the intended folder or solution root without guessing from the output directory. The repo's `.vscode/launch.json` uses those same project profiles, and `.vsconfig` is present for Visual Studio extension-development setup.
+
 ## Persistence model
 
 Sandbox state is stored in SQLite, not in memory.
@@ -34,6 +40,7 @@ Sandbox state is stored in SQLite, not in memory.
 - The same registry is visible to every host instance that points at the same database path
 
 That means a sandbox created over HTTP is still visible to a later stdio session, and vice versa.
+That shared registry is part of the bubble boundary, not a convenience cache.
 
 ## Security boundaries
 
@@ -42,6 +49,7 @@ That means a sandbox created over HTTP is still visible to a later stdio session
 - Sandbox names are normalized to filesystem-safe segments.
 - Build and tool noise directories such as `.git`, `.vs`, `bin`, `obj`, and `node_modules` are excluded from sandbox copies.
 - File reads, searches, writes, and patches stay inside the approved workspace boundary.
+- If a flow wants to step outside that boundary, the flow is wrong and needs to be reworked.
 
 ## Example flow
 
@@ -71,4 +79,3 @@ The same registry and the same tool logic are used regardless of transport.
 - Keep the SQLite database on local storage owned by the host machine.
 - If you move the database path, move it deliberately and keep the workspace roots aligned with the same trust boundary.
 - Use `docs/INSTALL.md` for the .NET-first release flow and `README.md` for the quick-start commands.
-

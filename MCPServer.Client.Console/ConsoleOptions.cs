@@ -10,6 +10,8 @@ internal sealed class ConsoleOptions
 
     public string? WorkingDirectory { get; private init; }
 
+    public string? WorkspaceRoot { get; private init; }
+
     public string? ToolName { get; private init; }
 
     public string? ToolArgumentsJson { get; private init; }
@@ -64,6 +66,7 @@ internal sealed class ConsoleOptions
       --server-path <path>      Path to MCPServer.Host executable for stdio mode.
       --endpoint <uri>          MCP Streamable HTTP endpoint for HTTP mode.
       --working-directory <dir> Optional server working directory for stdio mode.
+      --workspace-root <path>   Workspace root hint for stdio mode. Accepts a folder or a .sln/.slnx file path.
       --tool <name>             Tool to call after initialization. Defaults to server.info.
       --arguments <json>        Tool arguments as a JSON object.
       --chat                    Enter interactive chat mode through inference.generate.
@@ -88,6 +91,7 @@ internal sealed class ConsoleOptions
       --no-open-server-event-stream  Disable the MCP SSE stream in HTTP mode.
       --help                    Show this help.
       Chat mode supports /help, /exit, /quit, /reset, /clear, /prompt, /tools, /tool, /search, /read, /write, /patch, /edit, /compact, /provider, /model, /system, /strategy, and /fallback inside the prompt.
+      Chat mode also seeds a workspace context from the detected checkout root, launch-profile workspace hints, and workspace.roots.list, and /provider or /model reset the transcript while keeping that context.
 
     Examples:
       MCPServer.Client.Console --server-path dotnet --server-arg C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0\MCPServer.Host.dll --working-directory C:\Visual Studio Projects\MCPServer\MCPServer.Host\bin\Debug\net10.0
@@ -107,6 +111,7 @@ internal sealed class ConsoleOptions
         string? serverPath = null;
         string? endpointRaw = null;
         string? workingDirectory = null;
+        string? workspaceRootRaw = null;
         string? toolName = null;
         string? toolArgumentsJson = null;
         var chatMode = false;
@@ -149,6 +154,9 @@ internal sealed class ConsoleOptions
                     break;
                 case "--working-directory":
                     workingDirectory = ReadValue(args, ref i, arg);
+                    break;
+                case "--workspace-root":
+                    workspaceRootRaw = ReadValue(args, ref i, arg);
                     break;
                 case "--tool":
                     toolName = ReadValue(args, ref i, arg);
@@ -298,6 +306,11 @@ internal sealed class ConsoleOptions
             throw new ArgumentException("--working-directory can only be used with stdio transport.");
         }
 
+        if (transport is ConsoleTransportKind.Http && !string.IsNullOrWhiteSpace(workspaceRootRaw))
+        {
+            throw new ArgumentException("--workspace-root can only be used with stdio transport.");
+        }
+
         if (transport is ConsoleTransportKind.Http && serverArguments.Count > 0)
         {
             throw new ArgumentException("--server-arg can only be used with stdio transport.");
@@ -373,6 +386,7 @@ internal sealed class ConsoleOptions
             ServerPath = serverPath,
             Endpoint = endpoint,
             WorkingDirectory = workingDirectory,
+            WorkspaceRoot = NormalizeWorkspaceRoot(workspaceRootRaw),
             ToolName = toolName,
             ToolArgumentsJson = toolArgumentsJson,
             ChatMode = chatMode,
@@ -431,6 +445,25 @@ internal sealed class ConsoleOptions
         }
 
         return absoluteUri;
+    }
+
+    internal static string? NormalizeWorkspaceRoot(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = Path.GetFullPath(value.Trim());
+        var extension = Path.GetExtension(normalized);
+        if (string.Equals(extension, ".sln", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(extension, ".slnx", StringComparison.OrdinalIgnoreCase))
+        {
+            var directory = Path.GetDirectoryName(normalized);
+            return string.IsNullOrWhiteSpace(directory) ? normalized : directory;
+        }
+
+        return normalized;
     }
 
     private static string ReadValue(string[] args, ref int index, string optionName)

@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "chat": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "workingDirectory": "..",
+      "commandLineArgs": "--server-path dotnet --server-arg MCPServer.Host.dll --working-directory MCPServer.Host\\bin\\Debug\\net10.0 --chat",
+      "environmentVariables": {
+        "MCP_WORKSPACE_ROOT": "."
+      }
+    }
+  }
+}

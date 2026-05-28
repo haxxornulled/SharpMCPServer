@@ -1,0 +1,8 @@
+{
+  "MCPServer.VisualStudio.Extensibility.OpenChatConsole.DisplayName": "Open MCP chat console",
+  "MCPServer.VisualStudio.Extensibility.OpenChatConsole.ToolTipText": "Launch the repository chat console using the chat launch profile.",
+  "MCPServer.VisualStudio.Extensibility.OpenHost.DisplayName": "Launch MCP host",
+  "MCPServer.VisualStudio.Extensibility.OpenHost.ToolTipText": "Launch the MCP host using the host launch profile.",
+  "MCPServer.VisualStudio.Extensibility.OpenWorkspaceDashboard.DisplayName": "Open workspace dashboard",
+  "MCPServer.VisualStudio.Extensibility.OpenWorkspaceDashboard.ToolTipText": "Show the active Visual Studio workspace root, solution, and launch actions."
+}

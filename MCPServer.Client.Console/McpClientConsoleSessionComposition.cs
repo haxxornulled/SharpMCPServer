@@ -72,10 +72,11 @@ internal static class McpClientConsoleSessionComposition
         }
 
         var samplingHandler = CreateSamplingHandler(options);
+        var serverArguments = BuildStdioServerArguments(options);
         var processOptions = new McpClientProcessOptions
         {
             ServerExecutablePath = options.ServerPath,
-            ServerArguments = options.ServerArguments,
+            ServerArguments = serverArguments,
             WorkingDirectory = options.WorkingDirectory,
             ClientName = "mcpserver-client-console",
             ClientTitle = "MCP Server Client Console",
@@ -88,6 +89,43 @@ internal static class McpClientConsoleSessionComposition
         return started.Match(
             Succ: static session => Fin.Succ<IMcpClientSession>(session),
             Fail: static error => Fin.Fail<IMcpClientSession>(error));
+    }
+
+    internal static IReadOnlyList<string> BuildStdioServerArguments(
+        ConsoleOptions options,
+        Func<string, string?>? getEnvironmentVariable = null)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var arguments = new List<string>();
+        var workspaceRoot = McpClientConsoleWorkspaceContextResolver.ResolveCheckoutRoot(options, getEnvironmentVariable);
+        if (options.ServerArguments.Count > 0)
+        {
+            arguments.Add(options.ServerArguments[0]);
+
+            if (!string.IsNullOrWhiteSpace(workspaceRoot))
+            {
+                arguments.Add("--McpWorkspace:Roots:0:Name=workspace");
+                arguments.Add("--McpWorkspace:Roots:0:Path=" + workspaceRoot);
+                arguments.Add("--McpWorkspace:Roots:0:AllowWrite=true");
+            }
+
+            for (var i = 1; i < options.ServerArguments.Count; i++)
+            {
+                arguments.Add(options.ServerArguments[i]);
+            }
+
+            return arguments;
+        }
+
+        if (!string.IsNullOrWhiteSpace(workspaceRoot))
+        {
+            arguments.Add("--McpWorkspace:Roots:0:Name=workspace");
+            arguments.Add("--McpWorkspace:Roots:0:Path=" + workspaceRoot);
+            arguments.Add("--McpWorkspace:Roots:0:AllowWrite=true");
+        }
+
+        return arguments;
     }
 
     private static async ValueTask<Fin<IMcpClientSession>> CreateHttpSessionAsync(

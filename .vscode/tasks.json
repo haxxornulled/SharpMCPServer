@@ -1,0 +1,71 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build solution",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "${workspaceFolder}/MCPServer.slnx",
+        "-c",
+        "Debug",
+        "--no-restore"
+      ],
+      "group": "build",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "test unit tests",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "test",
+        "${workspaceFolder}/MCPServer.UnitTests/MCPServer.UnitTests.csproj",
+        "-c",
+        "Debug",
+        "--no-build"
+      ]
+    },
+    {
+      "label": "test chat runner slice",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "test",
+        "${workspaceFolder}/MCPServer.UnitTests/MCPServer.UnitTests.csproj",
+        "-c",
+        "Debug",
+        "--no-build",
+        "--filter",
+        "FullyQualifiedName~McpClientConsoleChatRunnerTests"
+      ]
+    },
+    {
+      "label": "npm: compile (extensions/vscode)",
+      "type": "process",
+      "command": "npm",
+      "args": [
+        "--prefix",
+        "${workspaceFolder}/extensions/vscode/mcpserver-ide-tools",
+        "run",
+        "compile"
+      ],
+      "group": "build",
+      "problemMatcher": "$tsc"
+    },
+    {
+      "label": "npm: watch (extensions/vscode)",
+      "type": "process",
+      "command": "npm",
+      "args": [
+        "--prefix",
+        "${workspaceFolder}/extensions/vscode/mcpserver-ide-tools",
+        "run",
+        "watch"
+      ],
+      "isBackground": true,
+      "problemMatcher": "$tsc-watch"
+    }
+  ]
+}

@@ -6,6 +6,20 @@ The host starts stdio and loopback Streamable HTTP by default. HTTP prefers `127
 
 Protocol baseline: MCP 2025-11-25. The current implementation matrix lives in [docs/SPEC_COMPLIANCE.md](docs/SPEC_COMPLIANCE.md).
 
+## Agent Bubble
+
+This repository is an explicit agent bubble, not a loose pile of tools.
+
+- The host is the authority.
+- Workspace roots and sandboxes are the bounded world.
+- Console, IDE extensions, and future sub-agents are thin entry points into that world.
+- Tools are capabilities inside the bubble, not ambient access to the machine.
+- Policy gates, approval flow, and session state stay inside the host and do not leak into prompts.
+- Workspace writes stay workspace-root scoped. No silent cross-root mutation.
+- The design goal is a safe, inspectable, nested agent system: one host, many constrained workers.
+
+If a feature weakens those boundaries, it is the wrong feature.
+
 ## Workspace map
 
 - `MCPServer.Host` is the primary MCP server host.
@@ -19,6 +33,7 @@ Protocol baseline: MCP 2025-11-25. The current implementation matrix lives in [d
 - `MCPServer.Ssh` and `MCPServer.Tools.Ssh` own SSH policy, runtime, and MCP tool exposure.
 - `python/` contains the `ctypes` wrapper for the NativeAOT bridge.
 - `scripts/Sync-PythonBridge.ps1` publishes the native bridge, syncs the Python package payload, and can build the wheel.
+- The Visual Studio and VS Code extension scaffolds under `extensions/` are thin shells over the same bubble: they launch the console, host, and workspace dashboard, but they do not own the real behavior.
 
 ## Workspace sandboxes
 
@@ -28,7 +43,9 @@ Workspace editing is workspace-root scoped and shared across stdio and Streamabl
 - `workspace.sandboxes.list`, `workspace.sandboxes.create`, and `workspace.sandboxes.delete` manage durable sandboxes.
 - `workspace.files.read`, `workspace.files.search`, `workspace.files.write`, and `workspace.files.applyPatch` operate inside approved roots and sandboxes only.
 - Sandbox operations are approval-gated.
+- If no explicit roots are configured, the host walks upward from its binary directory to the nearest `.slnx`, `.sln`, or `.git` marker and exposes that checkout as the default `workspace` root. That makes Visual Studio and VS Code launches land on the opened repo instead of the output folder.
 - Default paths live under `%LocalAppData%\MCPServer\workspace\workspace.db` and `%LocalAppData%\MCPServer\workspaces` unless overridden.
+- This is intentional: the workspace is the agent bubble. The host decides what is in-bounds, and sub-agents inherit only the roots and sandboxes the host exposes.
 
 See [docs/WORKSPACE_SANDBOXES.md](docs/WORKSPACE_SANDBOXES.md) for the full model.
 
@@ -154,6 +171,28 @@ dotnet run --project .\MCPServer.Client.Console\MCPServer.Client.Console.csproj 
 
 Inside chat mode, use `/prompt`, `/tools`, `/provider`, `/model`, `/system`, `/strategy`, and `/fallback` to inspect or change the active route without leaving the REPL.
 Use `/tool <name> [json]` to call any MCP tool from inside the chat loop, `/search` to use the workspace search tool, `/read`, `/write`, `/patch`, and `/edit` to reach the workspace file tools through MCP, `/compact [instructions]` to compress the transcript into retained context, and `/clear` as a friendlier alias for `/reset`.
+Chat mode seeds an initial workspace context from the detected checkout root and `workspace.roots.list`, and changing `/provider` or `/model` resets the transcript while keeping that workspace context.
+
+## IDE launch profiles
+
+`MCPServer.Host` and `MCPServer.Client.Console` both ship `Properties/launchSettings.json` profiles for IDE launches.
+
+- The console `chat` profile sets `MCP_WORKSPACE_ROOT=.` so Visual Studio and VS Code C# Dev Kit can open the workspace root automatically when you start the REPL from the IDE.
+- The host `host` profile keeps the server launch explicit and still lets the workspace layer resolve the repo root from the launched binary path.
+- The repo also ships [`.vscode/launch.json`](.vscode/launch.json), [`.vscode/tasks.json`](.vscode/tasks.json), and [`.vscode/extensions.json`](.vscode/extensions.json) wrappers so VS Code can launch, build, and recommend the C# and PowerShell tooling from the same project-owned setup.
+- The repo ships [`.vsconfig`](.vsconfig) with the Visual Studio extension development workload so Visual Studio can prompt for the SDK and related prerequisites without guessing.
+- If you want to override the inferred root manually, pass `--workspace-root <folder-or-solution-directory>` in stdio mode. If you pass a `.sln` or `.slnx` path, the console uses its containing directory as the workspace root.
+
+For VS Code, the intended path is C# Dev Kit plus the project launch profiles above. The debug configs in `.vscode/launch.json` point at the `chat` and `host` profiles instead of re-specifying arguments in editor state. For Visual Studio, import `.vsconfig` if the extension workload is missing, then choose the profile you want from the project launch settings.
+
+## IDE Extensions
+
+If you want to build editor integrations instead of just launching the console, the repo now carries two small scaffolds under [`extensions/`](extensions/README.md):
+
+- [`extensions/visualstudio/MCPServer.VisualStudio.Vsix`](extensions/visualstudio/MCPServer.VisualStudio.Vsix) is the shipping Visual Studio 2026-compatible VSSDK extension. It keeps the shell layer thin and pushes the workspace and launch logic into shared services.
+- In Visual Studio, the extension menu appears under `Extensions > MCPServer`.
+- [`extensions/vscode/mcpserver-ide-tools`](extensions/vscode/mcpserver-ide-tools) is a thin VS Code extension scaffold that opens the same repo-owned debug profiles from the command palette.
+- Both IDE extensions are control surfaces for the same agent bubble. They should remain thin, explicit, and unable to bypass workspace or policy boundaries.
 
 Use `inference.providers.list` first if you want to confirm which inference backends are enabled before you generate. Pass `{"probe":true}` when you want a live readiness ping instead of config-only listing, or use the console shortcut `--probe --probe-timeout-ms 3000` on `inference.providers.list` if you want the same thing without writing JSON by hand. For `inference.generate`, use `--provider lmstudio` or `--provider ollama` to inject `providerId` without typing it into the JSON payload yourself.
 
@@ -181,8 +220,9 @@ If you only need the wrapper package layout, see [python/README.md](python/READM
 ## Repository rules
 
 - `System.Text.Json` only.
-- Autofac for composition.
+- Constructor injection for composition.
 - No MediatR.
+- No AutoMapper.
 - Keep boundaries explicit.
 - Fix the first real failure before chasing downstream metadata errors.
 

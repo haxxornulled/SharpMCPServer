@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "MCPServer: Chat Console",
+      "type": "dotnet",
+      "request": "launch",
+      "projectPath": "${workspaceFolder}/MCPServer.Client.Console/MCPServer.Client.Console.csproj",
+      "launchConfigurationId": "TargetFramework=;chat",
+      "preLaunchTask": "build solution"
+    },
+    {
+      "name": "MCPServer: Host",
+      "type": "dotnet",
+      "request": "launch",
+      "projectPath": "${workspaceFolder}/MCPServer.Host/MCPServer.Host.csproj",
+      "launchConfigurationId": "TargetFramework=;host",
+      "preLaunchTask": "build solution"
+    },
+    {
+      "name": "MCPServer: VS Code Extension Host",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/vscode/mcpserver-ide-tools"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/extensions/vscode/mcpserver-ide-tools/out/**/*.js"
+      ],
+      "preLaunchTask": "npm: watch (extensions/vscode)"
+    }
+  ]
+}

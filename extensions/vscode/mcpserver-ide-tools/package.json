@@ -1,0 +1,68 @@
+{
+  "name": "mcpserver-ide-tools",
+  "displayName": "MCPServer IDE Tools",
+  "description": "Launch the MCPServer chat console and host from VS Code using the repository's debug profiles.",
+  "version": "0.1.0",
+  "publisher": "haxxornulled",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/haxxornulled/SharpMCPServer.git"
+  },
+  "homepage": "https://github.com/haxxornulled/SharpMCPServer/tree/main/extensions/vscode/mcpserver-ide-tools",
+  "bugs": {
+    "url": "https://github.com/haxxornulled/SharpMCPServer/issues"
+  },
+  "engines": {
+    "vscode": "^1.97.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "mcp",
+    "mcpserver",
+    "debug",
+    "workspace",
+    "launch-profile"
+  ],
+  "activationEvents": [
+    "onCommand:mcpserver.openChatConsole",
+    "onCommand:mcpserver.openHost",
+    "onCommand:mcpserver.showWorkspaceRoot"
+  ],
+  "main": "./out/extension.js",
+  "files": [
+    "out/**",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "mcpserver.openChatConsole",
+        "title": "MCPServer: Open Chat Console"
+      },
+      {
+        "command": "mcpserver.openHost",
+        "title": "MCPServer: Open Host"
+      },
+      {
+        "command": "mcpserver.showWorkspaceRoot",
+        "title": "MCPServer: Show Workspace Root"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "^1.97.0",
+    "typescript": "^5.8.0"
+  }
+}

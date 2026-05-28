@@ -180,6 +180,14 @@ public sealed class McpClientConsoleSmokeTests
             return;
         }
 
+        // Resolve a real installed model instead of assuming the provider's configured default.
+        // Ollama's default model can be missing locally even when the provider probe reports ready.
+        var selectedModel = await TryResolveInstalledInferenceModelAsync(hostWorkingDirectory, selectedProviderId, cancellationToken);
+        if (selectedModel is null)
+        {
+            return;
+        }
+
         var consoleResult = await RunProcessAsync(
             "dotnet",
             [
@@ -197,7 +205,9 @@ public sealed class McpClientConsoleSmokeTests
                 "--arguments",
                 "{\"prompt\":\"Say hello in one sentence.\"}",
                 "--provider",
-                selectedProviderId
+                selectedProviderId,
+                "--model",
+                selectedModel
             ],
             consoleWorkingDirectory,
             cancellationToken);
@@ -407,6 +417,83 @@ public sealed class McpClientConsoleSmokeTests
         }
 
         return null;
+    }
+
+    private static async Task<string?> TryResolveInstalledInferenceModelAsync(string hostWorkingDirectory, string providerId, CancellationToken cancellationToken)
+    {
+        var appSettingsPath = Path.Combine(hostWorkingDirectory, "appsettings.json");
+        if (!File.Exists(appSettingsPath))
+        {
+            return null;
+        }
+
+        using var appSettingsDocument = JsonDocument.Parse(await File.ReadAllTextAsync(appSettingsPath, cancellationToken).ConfigureAwait(false));
+        if (!TryGetString(appSettingsDocument.RootElement, out var baseAddress, "McpInference", "Providers", providerId, "BaseAddress"))
+        {
+            return null;
+        }
+
+        if (!Uri.TryCreate(baseAddress, UriKind.Absolute, out var providerBaseUri))
+        {
+            return null;
+        }
+
+        using var httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(3)
+        };
+
+        using var response = await httpClient.GetAsync(new Uri(providerBaseUri, "models"), cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        using var responseDocument = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+        if (!responseDocument.RootElement.TryGetProperty("data"u8, out var data) || data.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var item in data.EnumerateArray())
+        {
+            if (TryGetString(item, out var modelId, "id"))
+            {
+                return modelId;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryGetString(JsonElement root, out string? value, params string[] propertyPath)
+    {
+        if (root.ValueKind != JsonValueKind.Object || propertyPath.Length == 0)
+        {
+            value = null;
+            return false;
+        }
+
+        var current = root;
+        for (var i = 0; i < propertyPath.Length; i++)
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(propertyPath[i], out var next))
+            {
+                value = null;
+                return false;
+            }
+
+            current = next;
+        }
+
+        if (current.ValueKind != JsonValueKind.String)
+        {
+            value = null;
+            return false;
+        }
+
+        value = current.GetString();
+        return !string.IsNullOrWhiteSpace(value);
     }
 
     private static bool TryGetStructuredContent(string stdout, out JsonElement structuredContent)

@@ -21,10 +21,22 @@ TestResults/
 *.userosscache
 *.sln.docstates
 
+# Shared VS Code project config that we intentionally track
+!.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+
 # NuGet
 *.nupkg
 packages/
 .nuget/
+
+# Node / VS Code extension development
+extensions/vscode/**/node_modules/
+extensions/vscode/**/out/
+extensions/vscode/**/.vscode-test/
 
 # OS/editor junk
 .DS_Store

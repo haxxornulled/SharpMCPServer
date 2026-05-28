@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NeutralLanguage>en-US</NeutralLanguage>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.VisualStudio.Extensibility.Sdk" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.VisualStudio.Extensibility.Build" PrivateAssets="all" />
+    <PackageReference Include="LanguageExt.Core" VersionOverride="5.0.0-beta-51" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MCPServer.VisualStudio.Core\MCPServer.VisualStudio.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="ToolWindows\WorkspaceDashboardContent.xaml" />
+    <Page Remove="ToolWindows\WorkspaceDashboardContent.xaml" />
+  </ItemGroup>
+</Project>

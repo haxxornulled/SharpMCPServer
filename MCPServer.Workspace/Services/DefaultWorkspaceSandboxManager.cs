@@ -106,7 +106,7 @@ public sealed class DefaultWorkspaceSandboxManager : IWorkspaceSandboxCatalog, I
         var normalized = name.Trim();
         if (_options.Roots.Count == 0 && string.Equals(normalized, "workspace", StringComparison.OrdinalIgnoreCase))
         {
-            var path = AppContext.BaseDirectory;
+            var path = WorkspaceRootPathResolver.ResolveDefaultWorkspaceRootPath();
             return Fin.Succ(new WorkspaceRoot
             {
                 Name = "workspace",
