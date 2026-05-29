@@ -1200,7 +1200,9 @@ internal static class McpClientConsoleChatRunner
 
     private static int WriteFailure<T>(TextWriter error, Fin<T> value)
     {
-        error.WriteLine(McpClientConsoleResultHelpers.GetError(value));
+        var message = McpClientConsoleResultHelpers.GetError(value);
+        error.WriteLine(message);
+        McpClientConsoleOutput.WriteProviderStartHintIfNeeded(error, message);
         return 1;
     }
 

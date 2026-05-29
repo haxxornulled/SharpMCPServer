@@ -2,6 +2,7 @@ using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using System.Globalization;
 using MCPServer.AgentRouter.Infrastructure.Options;
+using MCPServer.Application.Mcp;
 using MCPServer.Host.Configuration;
 using MCPServer.Host.Composition;
 using MCPServer.Inference.Abstractions.Models;
@@ -94,6 +95,7 @@ try
             streamableHttpOptions.Authorization.Validate();
             var workspaceOptions = ReadWorkspaceOptions(hostContext.Configuration);
             workspaceOptions.Validate();
+            var requestExecutionOptions = ReadRequestExecutionOptions(hostContext.Configuration);
 
             containerBuilder.RegisterInstance(agentRouterSqliteOptions)
                 .AsSelf()
@@ -128,6 +130,10 @@ try
             // Compose the MCP server runtime through a single host-owned module so Program.cs stays
             // focused on host bootstrapping and configuration rather than scattered feature wiring.
             containerBuilder.RegisterModule(new McpServerHostRuntimeModule());
+
+            containerBuilder.RegisterInstance(requestExecutionOptions)
+                .AsSelf()
+                .SingleInstance();
 
         });
 
@@ -199,6 +205,21 @@ static StreamableHttpMcpTransportOptions ReadStreamableHttpTransportOptions(ICon
             RequiredScopes = requiredScopes,
             ScopesSupported = scopesSupported
         }
+    };
+}
+
+static McpRequestExecutionOptions ReadRequestExecutionOptions(IConfiguration configuration)
+{
+    ArgumentNullException.ThrowIfNull(configuration);
+
+    var section = configuration.GetSection("McpRequestExecution");
+    var defaultRequestTimeoutSecondsRaw = section["DefaultRequestTimeoutSeconds"];
+
+    return new McpRequestExecutionOptions
+    {
+        DefaultRequestTimeout = int.TryParse(defaultRequestTimeoutSecondsRaw, out var defaultRequestTimeoutSeconds) && defaultRequestTimeoutSeconds > 0
+            ? TimeSpan.FromSeconds(defaultRequestTimeoutSeconds)
+            : TimeSpan.FromSeconds(60)
     };
 }
 

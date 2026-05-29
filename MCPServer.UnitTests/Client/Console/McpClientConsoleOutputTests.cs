@@ -24,6 +24,22 @@ public sealed class McpClientConsoleOutputTests
     }
 
     [Fact]
+    public void WriteToolResultBody_Appends_A_Start_Prompt_When_Inference_Error_Reports_All_Providers_Failed()
+    {
+        var result = ToolCallResult.Text(
+            "All inference providers failed:",
+            isError: true);
+
+        using var output = new StringWriter();
+
+        McpClientConsoleOutput.WriteToolResultBody(output, result);
+
+        var text = output.ToString();
+        Assert.Contains("All inference providers failed:", text, StringComparison.Ordinal);
+        Assert.Contains("Hint: start the configured provider process, then retry.", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WriteToolResultBody_Appends_A_Start_Prompt_When_All_Probed_Providers_Are_Unreachable()
     {
         using var structuredContent = JsonDocument.Parse("""

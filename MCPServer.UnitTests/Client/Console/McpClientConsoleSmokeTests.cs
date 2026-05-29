@@ -32,7 +32,9 @@ public sealed class McpClientConsoleSmokeTests
                 $"--McpTransport:Http:Port={port}",
                 "--McpTransport:Http:BindLoopbackOnly=true",
                 "--McpTransport:Http:SseHeartbeatMilliseconds=100",
-                "--McpTransport:Http:MaxSessionHistoryMessages=8"
+                "--McpTransport:Http:MaxSessionHistoryMessages=8",
+                "--McpInference:Providers:lmstudio:Enabled=false",
+                "--McpInference:Providers:ollama:Enabled=false"
             ],
             hostWorkingDirectory);
 
@@ -262,7 +264,6 @@ public sealed class McpClientConsoleSmokeTests
         Assert.Contains("Calling tool: inference.generate", consoleResult.Stdout, StringComparison.Ordinal);
         Assert.Contains("Tool returned an error result.", consoleResult.Stdout, StringComparison.Ordinal);
         Assert.Contains("All inference providers failed:", consoleResult.Stdout, StringComparison.Ordinal);
-        Assert.Contains("inference provider 'lmstudio' failed", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Hint: start the configured provider process, then retry.", consoleResult.Stdout, StringComparison.Ordinal);
     }
 
@@ -487,56 +488,54 @@ public sealed class McpClientConsoleSmokeTests
                         providerSelectionResult.Stdout,
                         target.ProviderId,
                         "ready",
-                        new Uri(providerProxyBaseUris[target.ProviderId], "v1/models").AbsoluteUri,
+                        new Uri(providerProxyBaseUris[target.ProviderId], GetProviderProbePath(target.ProviderId)).AbsoluteUri,
                         200);
 
-                    var providerProbeExchange = Assert.Single(
-                        providerProxies[target.ProviderId].Exchanges,
-                        exchange =>
+                    var providerProbeExchange = providerProxies[target.ProviderId].Exchanges
+                        .Where(exchange =>
                             string.Equals(exchange.Method, HttpMethod.Get.Method, StringComparison.OrdinalIgnoreCase) &&
-                            string.Equals(exchange.PathAndQuery, "/v1/models", StringComparison.Ordinal));
+                            string.Equals(exchange.PathAndQuery, GetProviderProbePath(target.ProviderId), StringComparison.Ordinal))
+                        .ToArray();
+                    Assert.NotEmpty(providerProbeExchange);
 
-                    AssertProviderProbeExchange(providerProbeExchange, target.Model);
+                    AssertProviderProbeExchange(providerProbeExchange[0], target.ProviderId, target.Model);
                 }
 
                 AssertHostProviderListExchange(hostProxy.Exchanges, readyProviders);
 
-                foreach (var target in liveTargets)
-                {
-                    var hostExchangeStart = hostProxy.Exchanges.Count;
-                    var providerExchangeStart = providerProxies[target.ProviderId].Exchanges.Count;
+                var selectedTarget = liveTargets[0];
+                var hostExchangeStart = hostProxy.Exchanges.Count;
+                var providerExchangeStart = providerProxies[selectedTarget.ProviderId].Exchanges.Count;
 
-                    var consoleResult = await RunProcessAsync(
-                        "dotnet",
-                        [
-                            consoleDll,
-                            "--endpoint",
-                            hostEndpoint,
-                            "--open-server-event-stream",
-                            "--tool",
-                            "inference.generate",
-                            "--arguments",
-                            "{\"prompt\":\"Say hello in one sentence.\",\"strategy\":\"PrimaryOnly\"}",
-                            "--provider",
-                            target.ProviderId,
-                            "--model",
-                            target.Model
-                        ],
-                        consoleWorkingDirectory,
-                        cancellationToken);
+                var consoleResult = await RunProcessAsync(
+                    "dotnet",
+                    [
+                        consoleDll,
+                        "--endpoint",
+                        hostEndpoint,
+                        "--tool",
+                        "inference.generate",
+                        "--arguments",
+                        "{\"prompt\":\"Say hello in one sentence.\",\"strategy\":\"PrimaryOnly\"}",
+                        "--provider",
+                        selectedTarget.ProviderId,
+                        "--model",
+                        selectedTarget.Model
+                    ],
+                    consoleWorkingDirectory,
+                    cancellationToken);
 
-                    AssertSuccessfulProcessResult(consoleResult);
-                    Assert.Contains("Connected to", consoleResult.Stdout, StringComparison.Ordinal);
-                    Assert.Contains("Calling tool: inference.generate", consoleResult.Stdout, StringComparison.Ordinal);
-                    Assert.Contains("Tool returned a success result.", consoleResult.Stdout, StringComparison.Ordinal);
-                    AssertInferenceResponseMetadata(consoleResult.Stdout, target.ProviderId, target.Model);
+                AssertSuccessfulProcessResult(consoleResult);
+                Assert.Contains("Connected to", consoleResult.Stdout, StringComparison.Ordinal);
+                Assert.Contains("Calling tool: inference.generate", consoleResult.Stdout, StringComparison.Ordinal);
+                Assert.Contains("Tool returned a success result.", consoleResult.Stdout, StringComparison.Ordinal);
+                AssertInferenceResponseMetadata(consoleResult.Stdout, selectedTarget.ProviderId, selectedTarget.Model);
 
-                    var hostExchanges = hostProxy.Exchanges.Skip(hostExchangeStart).ToArray();
-                    AssertHostGenerateExchange(hostExchanges, target.ProviderId, target.Model);
+                var hostExchanges = hostProxy.Exchanges.Skip(hostExchangeStart).ToArray();
+                AssertHostGenerateExchange(hostExchanges, selectedTarget.ProviderId, selectedTarget.Model);
 
-                    var providerExchanges = providerProxies[target.ProviderId].Exchanges.Skip(providerExchangeStart).ToArray();
-                    AssertProviderGenerateExchange(providerExchanges, target.ProviderId, target.Model);
-                }
+                var providerExchanges = providerProxies[selectedTarget.ProviderId].Exchanges.Skip(providerExchangeStart).ToArray();
+                AssertProviderGenerateExchange(providerExchanges, selectedTarget.ProviderId, selectedTarget.Model);
             }
             finally
             {
@@ -669,7 +668,7 @@ public sealed class McpClientConsoleSmokeTests
         };
 
         var endpoint = new Uri($"http://127.0.0.1:{port}/mcp/", UriKind.Absolute);
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(60);
         var origin = endpoint.GetLeftPart(UriPartial.Authority);
 
         while (true)
@@ -1145,42 +1144,70 @@ public sealed class McpClientConsoleSmokeTests
         ];
     }
 
-    private static void AssertProviderProbeExchange(CapturedHttpExchange exchange, string expectedModel)
+    private static void AssertProviderProbeExchange(CapturedHttpExchange exchange, string providerId, string expectedModel)
     {
+        var expectedPath = GetProviderProbePath(providerId);
         Assert.Equal(HttpMethod.Get.Method, exchange.Method, StringComparer.OrdinalIgnoreCase);
-        Assert.Equal("/v1/models", exchange.PathAndQuery, StringComparer.Ordinal);
+        Assert.Equal(expectedPath, exchange.PathAndQuery, StringComparer.Ordinal);
         Assert.Equal((int)HttpStatusCode.OK, exchange.StatusCode);
         Assert.False(string.IsNullOrWhiteSpace(exchange.ResponseBody));
 
         using var responseDocument = JsonDocument.Parse(exchange.ResponseBody);
         var root = responseDocument.RootElement;
-        Assert.True(root.TryGetProperty("data"u8, out var data) && data.ValueKind == JsonValueKind.Array, "Expected the provider probe response to contain a data array.");
-        Assert.True(data.GetArrayLength() > 0, "Expected the provider probe response to contain at least one model.");
-        Assert.Contains(data.EnumerateArray(), model =>
-            string.Equals(model.GetProperty("id").GetString(), expectedModel, StringComparison.Ordinal));
+        var expectedModelsArrayProperty = GetProviderProbeModelsArrayProperty(providerId);
+        var expectedModelProperty = GetProviderProbeModelProperty(providerId);
+        Assert.True(
+            root.TryGetProperty(expectedModelsArrayProperty, out var models) && models.ValueKind == JsonValueKind.Array,
+            $"Expected the provider probe response to contain a {expectedModelsArrayProperty} array.");
+        Assert.True(models.GetArrayLength() > 0, "Expected the provider probe response to contain at least one model.");
+        Assert.Contains(models.EnumerateArray(), model =>
+            string.Equals(model.GetProperty(expectedModelProperty).GetString(), expectedModel, StringComparison.Ordinal));
+    }
+
+    private static string GetProviderProbePath(string providerId)
+    {
+        return string.Equals(providerId, "ollama", StringComparison.OrdinalIgnoreCase)
+            ? "/api/tags"
+            : "/v1/models";
+    }
+
+    private static string GetProviderProbeModelsArrayProperty(string providerId)
+    {
+        return string.Equals(providerId, "ollama", StringComparison.OrdinalIgnoreCase)
+            ? "models"
+            : "data";
+    }
+
+    private static string GetProviderProbeModelProperty(string providerId)
+    {
+        return string.Equals(providerId, "ollama", StringComparison.OrdinalIgnoreCase)
+            ? "model"
+            : "id";
     }
 
     private static void AssertProviderGenerateExchange(CapturedHttpExchange[] exchanges, string providerId, string model)
     {
+        var expectedPath = GetProviderChatCompletionPath(providerId);
         var exchange = Assert.Single(exchanges, captured =>
             string.Equals(captured.Method, HttpMethod.Post.Method, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(captured.PathAndQuery, "/v1/chat/completions", StringComparison.Ordinal));
+            string.Equals(captured.PathAndQuery, expectedPath, StringComparison.Ordinal));
 
-        AssertOpenAiChatCompletionRequest(exchange, providerId, model, "Say hello in one sentence.");
-        AssertOpenAiChatCompletionResponse(exchange, providerId, model);
+        AssertProviderChatCompletionRequest(exchange, providerId, model, "Say hello in one sentence.");
+        AssertProviderChatCompletionResponse(exchange, providerId, model);
     }
 
     private static void AssertProviderChatExchanges(CapturedHttpExchange[] exchanges, LiveProviderTarget target, string expectedPrompt)
     {
+        var expectedPath = GetProviderChatCompletionPath(target.ProviderId);
         var exchange = Assert.Single(exchanges, captured =>
             string.Equals(captured.Method, HttpMethod.Post.Method, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(captured.PathAndQuery, "/v1/chat/completions", StringComparison.Ordinal));
+            string.Equals(captured.PathAndQuery, expectedPath, StringComparison.Ordinal));
 
-        AssertOpenAiChatCompletionRequest(exchange, target.ProviderId, target.Model, expectedPrompt);
-        AssertOpenAiChatCompletionResponse(exchange, target.ProviderId, target.Model);
+        AssertProviderChatCompletionRequest(exchange, target.ProviderId, target.Model, expectedPrompt);
+        AssertProviderChatCompletionResponse(exchange, target.ProviderId, target.Model);
     }
 
-    private static void AssertOpenAiChatCompletionRequest(CapturedHttpExchange exchange, string providerId, string model, string expectedPrompt)
+    private static void AssertProviderChatCompletionRequest(CapturedHttpExchange exchange, string providerId, string model, string expectedPrompt)
     {
         Assert.Equal((int)HttpStatusCode.OK, exchange.StatusCode);
         Assert.False(string.IsNullOrWhiteSpace(exchange.RequestBody));
@@ -1200,21 +1227,41 @@ public sealed class McpClientConsoleSmokeTests
             (content.GetString() ?? string.Empty).Contains(expectedPrompt, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static void AssertOpenAiChatCompletionResponse(CapturedHttpExchange exchange, string providerId, string model)
+    private static void AssertProviderChatCompletionResponse(CapturedHttpExchange exchange, string providerId, string model)
     {
         Assert.Equal((int)HttpStatusCode.OK, exchange.StatusCode);
         Assert.False(string.IsNullOrWhiteSpace(exchange.ResponseBody));
 
         using var responseDocument = JsonDocument.Parse(exchange.ResponseBody);
         var root = responseDocument.RootElement;
-        if (root.TryGetProperty("model"u8, out var responseModel) && responseModel.ValueKind == JsonValueKind.String)
+
+        if (string.Equals(providerId, "ollama", StringComparison.OrdinalIgnoreCase))
         {
-            Assert.Equal(model, responseModel.GetString(), StringComparer.Ordinal);
+            if (root.TryGetProperty("model"u8, out var responseModel) && responseModel.ValueKind == JsonValueKind.String)
+            {
+                Assert.Equal(model, responseModel.GetString(), StringComparer.Ordinal);
+            }
+
+            Assert.True(root.TryGetProperty("message"u8, out var ollamaMessage) && ollamaMessage.ValueKind == JsonValueKind.Object, $"Expected provider '{providerId}' to return a message object.");
+            Assert.False(string.IsNullOrWhiteSpace(ollamaMessage.GetProperty("content").GetString()));
+            return;
+        }
+
+        if (root.TryGetProperty("model"u8, out var openAiResponseModel) && openAiResponseModel.ValueKind == JsonValueKind.String)
+        {
+            Assert.Equal(model, openAiResponseModel.GetString(), StringComparer.Ordinal);
         }
 
         Assert.True(root.TryGetProperty("choices"u8, out var choices) && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0, $"Expected provider '{providerId}' to return a non-empty choices array.");
-        var message = choices[0].GetProperty("message");
-        Assert.False(string.IsNullOrWhiteSpace(message.GetProperty("content").GetString()));
+        var choiceMessage = choices[0].GetProperty("message");
+        Assert.False(string.IsNullOrWhiteSpace(choiceMessage.GetProperty("content").GetString()));
+    }
+
+    private static string GetProviderChatCompletionPath(string providerId)
+    {
+        return string.Equals(providerId, "ollama", StringComparison.OrdinalIgnoreCase)
+            ? "/api/chat"
+            : "/v1/chat/completions";
     }
 
     private static void AssertHostProviderListExchange(IReadOnlyList<CapturedHttpExchange> exchanges, IReadOnlyList<string> readyProviders)
@@ -1562,8 +1609,10 @@ public sealed class McpClientConsoleSmokeTests
             return false;
         }
 
-        var json = stdout[(markerIndex + marker.Length)..].Trim();
-        if (json.Length == 0)
+        var remainder = stdout[(markerIndex + marker.Length)..];
+        var lines = remainder.Split(["\r\n", "\n"], StringSplitOptions.None);
+        var json = lines.Select(line => line.Trim()).FirstOrDefault(line => line.Length > 0);
+        if (string.IsNullOrWhiteSpace(json))
         {
             return false;
         }

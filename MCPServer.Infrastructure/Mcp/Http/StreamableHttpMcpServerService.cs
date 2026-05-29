@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -7,6 +8,11 @@ using MCPServer.Application.Mcp.JsonRpc.Interfaces;
 using MCPServer.Domain.Mcp;
 using MCPServer.Infrastructure.Mcp.Http.Authorization;
 using MCPServer.Infrastructure.Mcp.JsonRpc;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Extensions;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -60,108 +66,83 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
             return;
         }
 
-        var prefixes = _options.GetListenerPrefixes();
-        if (prefixes.Count == 0)
-        {
-            _logger.LogWarning("MCP Streamable HTTP transport is enabled but no listener prefixes were configured.");
-            return;
-        }
-
-        HttpListener? listener = null;
         try
         {
-            listener = CreateListener(prefixes);
-            listener.Start();
+            await RunServerAsync(_options.Port, stoppingToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (_options.Port == StreamableHttpMcpTransportOptions.DefaultLoopbackPort && IsAddressInUse(ex))
         {
-            listener?.Close();
             var fallbackPort = GetAvailableLoopbackPort();
-            prefixes = _options.GetListenerPrefixes(fallbackPort);
-            listener = CreateListener(prefixes);
-            listener.Start();
-            _logger.LogWarning("MCP Streamable HTTP transport port {Port} was unavailable. Falling back to loopback port {FallbackPort}.", _options.Port, fallbackPort);
+            _logger.LogWarning(
+                "MCP Streamable HTTP transport port {Port} was unavailable. Falling back to loopback port {FallbackPort}.",
+                _options.Port,
+                fallbackPort);
+
+            await RunServerAsync(fallbackPort, stoppingToken).ConfigureAwait(false);
         }
+    }
+
+    private async Task RunServerAsync(int port, CancellationToken stoppingToken)
+    {
+        await using var app = CreateApplication(port, stoppingToken);
+        await app.StartAsync(stoppingToken).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "MCP Streamable HTTP transport started on {Prefixes}",
+            string.Join(", ", GetListeningUrls(port)));
 
         try
         {
-            using var cancellationRegistration = stoppingToken.Register(static state =>
+            await app.WaitForShutdownAsync(stoppingToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            try
             {
-                if (state is HttpListener httpListener)
-                {
-                    try
-                    {
-                        httpListener.Stop();
-                    }
-                    catch
-                    {
-                    }
-                }
-            }, listener);
-
-            _logger.LogInformation("MCP Streamable HTTP transport started on {Prefixes}", string.Join(", ", prefixes));
-
-            while (!stoppingToken.IsCancellationRequested)
+                await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
             {
-                HttpListenerContext? context;
-                try
-                {
-                    context = await listener.GetContextAsync().ConfigureAwait(false);
-                }
-                catch (HttpListenerException) when (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (ObjectDisposedException) when (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
-
-                _ = HandleContextAsync(context, stoppingToken);
             }
         }
-        finally
+    }
+
+    private WebApplication CreateApplication(int port, CancellationToken stoppingToken)
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
-            listener?.Close();
-        }
+            ApplicationName = typeof(StreamableHttpMcpServerService).Assembly.GetName().Name,
+            ContentRootPath = AppContext.BaseDirectory
+        });
+
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls(GetListeningUrls(port).ToArray());
+
+        var app = builder.Build();
+        app.Run(context => HandleContextAsync(context, stoppingToken));
+        return app;
     }
 
-    private static HttpListener CreateListener(IReadOnlyList<string> prefixes)
+    private IReadOnlyList<string> GetListeningUrls(int port)
     {
-        var listener = new HttpListener();
-        foreach (var prefix in prefixes)
+        var portText = port.ToString(CultureInfo.InvariantCulture);
+        if (_options.BindLoopbackOnly)
         {
-            listener.Prefixes.Add(prefix);
+            return [$"http://127.0.0.1:{portText}"];
         }
 
-        return listener;
+        return [$"http://*:{portText}"];
     }
 
-    private static bool IsAddressInUse(Exception ex)
+    private async Task HandleContextAsync(HttpContext context, CancellationToken stoppingToken)
     {
-        return ex is HttpListenerException httpListenerException && httpListenerException.ErrorCode is 32 or 183 ||
-            ex is SocketException socketException && socketException.SocketErrorCode is SocketError.AddressAlreadyInUse or SocketError.AddressNotAvailable;
-    }
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stoppingToken);
+        var cancellationToken = linkedCts.Token;
 
-    private static int GetAvailableLoopbackPort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
         try
         {
-            return ((IPEndPoint)listener.LocalEndpoint).Port;
-        }
-        finally
-        {
-            listener.Stop();
-        }
-    }
+            var requestUri = new Uri(context.Request.GetDisplayUrl());
 
-    private async Task HandleContextAsync(HttpListenerContext context, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var requestUri = context.Request.Url ?? new Uri("http://127.0.0.1/");
             if (_options.Authorization.Enabled && _metadataProvider.IsProtectedResourceMetadataRequest(requestUri))
             {
                 await HandleProtectedResourceMetadataAsync(context, requestUri, cancellationToken).ConfigureAwait(false);
@@ -214,31 +195,13 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to process MCP Streamable HTTP request.");
-            TryWriteFailure(context.Response, HttpStatusCode.InternalServerError);
-        }
-        finally
-        {
-            try
-            {
-                context.Response.OutputStream.Close();
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                context.Response.Close();
-            }
-            catch
-            {
-            }
+            await TryWriteFailureAsync(context.Response, HttpStatusCode.InternalServerError, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private async Task HandleProtectedResourceMetadataAsync(HttpListenerContext context, Uri requestUri, CancellationToken cancellationToken)
+    private async Task HandleProtectedResourceMetadataAsync(HttpContext context, Uri requestUri, CancellationToken cancellationToken)
     {
-        if (!string.Equals(context.Request.HttpMethod, HttpMethod.Get.Method, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(context.Request.Method, HttpMethod.Get.Method, StringComparison.OrdinalIgnoreCase))
         {
             await WriteResponseAsync(context.Response, MethodNotAllowed("GET"), cancellationToken).ConfigureAwait(false);
             return;
@@ -267,7 +230,7 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
             cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task HandleGetAsync(HttpListenerContext context, StreamableHttpMcpRequest request, CancellationToken cancellationToken)
+    private async Task HandleGetAsync(HttpContext context, StreamableHttpMcpRequest request, CancellationToken cancellationToken)
     {
         if (!TryValidateOrigin(request, out var originError))
         {
@@ -308,23 +271,19 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
         var response = context.Response;
         response.StatusCode = (int)HttpStatusCode.OK;
         response.ContentType = TextEventStreamContentType;
-        response.SendChunked = true;
         response.Headers["Cache-Control"] = "no-cache";
         response.Headers["Connection"] = "keep-alive";
         response.Headers["X-Accel-Buffering"] = "no";
+        response.Headers[StreamableHttpMcpHeaderNames.SessionId] = session.SessionId;
 
-        if (session.SessionId is { } sessionId)
-        {
-            response.Headers[StreamableHttpMcpHeaderNames.SessionId] = sessionId;
-        }
-
+        await response.StartAsync(cancellationToken).ConfigureAwait(false);
         await session.Transport.OpenEventStreamAsync(
-            response.OutputStream,
+            response.Body,
             request.GetHeader(StreamableHttpMcpHeaderNames.LastEventId),
             cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task HandleDeleteAsync(HttpListenerContext context, StreamableHttpMcpRequest request, CancellationToken cancellationToken)
+    private async Task HandleDeleteAsync(HttpContext context, StreamableHttpMcpRequest request, CancellationToken cancellationToken)
     {
         if (!TryValidateOrigin(request, out var originError))
         {
@@ -363,37 +322,30 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
         }
 
         context.Response.StatusCode = (int)HttpStatusCode.NoContent;
-        context.Response.ContentLength64 = 0;
-        await context.Response.OutputStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        context.Response.ContentLength = 0;
+        await context.Response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static StreamableHttpMcpRequestEnvelope ReadRequestEnvelope(HttpListenerRequest request)
+    private static StreamableHttpMcpRequestEnvelope ReadRequestEnvelope(HttpRequest request)
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var headerNames = request.Headers.AllKeys ?? Array.Empty<string>();
-        foreach (var headerName in headerNames)
+        foreach (var header in request.Headers)
         {
-            if (headerName is null)
-            {
-                continue;
-            }
-
-            var headerValue = request.Headers[headerName];
-            headers[headerName] = headerValue is null ? string.Empty : headerValue;
+            headers[header.Key] = header.Value.ToString();
         }
 
         return new StreamableHttpMcpRequestEnvelope
         {
-            Method = request.HttpMethod,
-            RequestUri = request.Url ?? new Uri("http://127.0.0.1/"),
+            Method = request.Method,
+            RequestUri = new Uri(request.GetDisplayUrl()),
             Headers = headers
         };
     }
 
-    private async ValueTask<StreamableHttpMcpRequest> ReadRequestAsync(HttpListenerRequest request, StreamableHttpMcpRequestEnvelope requestEnvelope, CancellationToken cancellationToken)
+    private static async ValueTask<StreamableHttpMcpRequest> ReadRequestAsync(HttpRequest request, StreamableHttpMcpRequestEnvelope requestEnvelope, CancellationToken cancellationToken)
     {
         await using var memory = new MemoryStream();
-        await request.InputStream.CopyToAsync(memory, cancellationToken).ConfigureAwait(false);
+        await request.Body.CopyToAsync(memory, cancellationToken).ConfigureAwait(false);
 
         return new StreamableHttpMcpRequest
         {
@@ -404,7 +356,7 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
         };
     }
 
-    private async ValueTask WriteAuthorizationFailureAsync(HttpListenerResponse response, McpHttpAuthorizationDecision decision, CancellationToken cancellationToken)
+    private async ValueTask WriteAuthorizationFailureAsync(HttpResponse response, McpHttpAuthorizationDecision decision, CancellationToken cancellationToken)
     {
         response.StatusCode = (int)decision.StatusCode;
         if (!string.IsNullOrWhiteSpace(decision.WwwAuthenticate))
@@ -412,11 +364,11 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
             response.Headers["WWW-Authenticate"] = decision.WwwAuthenticate;
         }
 
-        response.ContentLength64 = 0;
-        await response.OutputStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        response.ContentLength = 0;
+        await response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask WriteResponseAsync(HttpListenerResponse response, StreamableHttpMcpResponse transportResponse, CancellationToken cancellationToken)
+    private async ValueTask WriteResponseAsync(HttpResponse response, StreamableHttpMcpResponse transportResponse, CancellationToken cancellationToken)
     {
         response.StatusCode = (int)transportResponse.StatusCode;
 
@@ -425,30 +377,33 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
             response.ContentType = transportResponse.ContentType;
         }
 
-        foreach (var header in transportResponse.Headers)
+        if (transportResponse.Headers is not null)
         {
-            response.Headers[header.Key] = header.Value;
+            foreach (var header in transportResponse.Headers)
+            {
+                response.Headers[header.Key] = header.Value;
+            }
         }
 
-        if (transportResponse.Body is not { Length: > 0 } body)
+        var body = transportResponse.Body ?? Array.Empty<byte>();
+        response.ContentLength = body.Length;
+        if (body.Length == 0)
         {
-            response.ContentLength64 = 0;
-            await response.OutputStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            await response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        response.ContentLength64 = body.Length;
-        await response.OutputStream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
-        await response.OutputStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await response.Body.WriteAsync(body, cancellationToken).ConfigureAwait(false);
+        await response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private void TryWriteFailure(HttpListenerResponse response, HttpStatusCode statusCode)
+    private async ValueTask TryWriteFailureAsync(HttpResponse response, HttpStatusCode statusCode, CancellationToken cancellationToken)
     {
         try
         {
             response.StatusCode = (int)statusCode;
-            response.ContentLength64 = 0;
-            response.OutputStream.Flush();
+            response.ContentLength = 0;
+            await response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -580,5 +535,33 @@ public sealed class StreamableHttpMcpServerService : BackgroundService
         }
 
         return false;
+    }
+
+    private static bool IsAddressInUse(Exception ex)
+    {
+        return ex is AddressInUseException ||
+               ex is SocketException socketException && IsAddressInUse(socketException) ||
+               ex is IOException ioException && ioException.InnerException is SocketException innerSocketException && IsAddressInUse(innerSocketException);
+    }
+
+    private static bool IsAddressInUse(SocketException socketException)
+    {
+        return socketException.SocketErrorCode is SocketError.AddressAlreadyInUse or
+            SocketError.AddressNotAvailable or
+            SocketError.AccessDenied;
+    }
+
+    private static int GetAvailableLoopbackPort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            return ((IPEndPoint)listener.LocalEndpoint).Port;
+        }
+        finally
+        {
+            listener.Stop();
+        }
     }
 }

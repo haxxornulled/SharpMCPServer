@@ -74,6 +74,19 @@ internal static class McpClientConsoleOutput
         output.WriteLine(ProviderStartHint);
     }
 
+    internal static void WriteProviderStartHintIfNeeded(TextWriter output, string? message)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+
+        if (string.IsNullOrWhiteSpace(message) || !ContainsConnectivityFailureText(message))
+        {
+            return;
+        }
+
+        output.WriteLine();
+        output.WriteLine(ProviderStartHint);
+    }
+
     private static bool ShouldPromptToStartProviderInference(ToolCallResult result)
     {
         if (result.IsError && HasConnectivityFailureText(result.Content))
@@ -109,7 +122,8 @@ internal static class McpClientConsoleOutput
             text.Contains("no connection could be made", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("could not connect", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("failed to connect", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("not listening", StringComparison.OrdinalIgnoreCase);
+            text.Contains("not listening", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("all inference providers failed", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool HasUnreachableProviders(JsonElement? structuredContent)
