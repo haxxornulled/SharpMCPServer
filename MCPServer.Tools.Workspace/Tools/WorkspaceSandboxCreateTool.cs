@@ -2,6 +2,7 @@ using System.Text.Json;
 using LanguageExt;
 using MCPServer.Application.Mcp.Interfaces;
 using MCPServer.Domain.Mcp;
+using MCPServer.Workspace.Configuration;
 using MCPServer.Workspace;
 using MCPServer.Workspace.Interfaces;
 using MCPServer.Workspace.Models;
@@ -14,10 +15,12 @@ public sealed class WorkspaceSandboxCreateTool : IMcpTool
     private static readonly JsonElement OutputSchema = WorkspaceToolSchemas.CreateSandboxCreateOutputSchema();
 
     private readonly IWorkspaceSandboxManager _sandboxManager;
+    private readonly McpWorkspaceOptions _options;
 
-    public WorkspaceSandboxCreateTool(IWorkspaceSandboxManager sandboxManager)
+    public WorkspaceSandboxCreateTool(IWorkspaceSandboxManager sandboxManager, McpWorkspaceOptions options)
     {
         _sandboxManager = sandboxManager ?? throw new ArgumentNullException(nameof(sandboxManager));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     public McpToolDescriptor Descriptor { get; } = new McpToolDescriptor
@@ -56,15 +59,10 @@ public sealed class WorkspaceSandboxCreateTool : IMcpTool
             return Fin.Succ<ToolCallResult>(ToolCallResult.Text($"{WorkspaceToolNames.SandboxesCreate} requires a string sourceRootName.", isError: true));
         }
 
-        if (WorkspaceToolArguments.RequireString(request.ApprovalToken, "approvalToken", WorkspaceToolNames.SandboxesCreate).IsFail)
-        {
-            return Fin.Succ<ToolCallResult>(ToolCallResult.Text($"{WorkspaceToolNames.SandboxesCreate} requires a string approvalToken.", isError: true));
-        }
-
         var result = await _sandboxManager.CreateAsync(
             request.SourceRootName.Trim(),
             string.IsNullOrWhiteSpace(request.SandboxName) ? null : request.SandboxName.Trim(),
-            request.ApprovalToken.Trim(),
+            _options.ApprovalToken,
             cancellationToken).ConfigureAwait(false);
 
         return result.Match<Fin<ToolCallResult>>(

@@ -113,8 +113,8 @@ internal static class McpClientConsoleChatRunner
             return;
         }
 
-        var (providerId, model, finishReason) = ExtractAssistantMetadata(toolResult);
-        PrintAssistantMessage(output, responseText, providerId, model, finishReason);
+        var assistantMetadata = ExtractAssistantMetadata(toolResult);
+        PrintAssistantMessage(output, responseText, assistantMetadata);
         state.AppendAssistantMessage(responseText);
     }
 
@@ -355,7 +355,7 @@ internal static class McpClientConsoleChatRunner
         if (!TryParseRoutingStrategy(value, out var strategy))
         {
             error.WriteLine($"Unsupported routing strategy: {value}");
-            error.WriteLine("Valid values: PrimaryOnly, PrimaryThenFallback, FanOutCompare.");
+            error.WriteLine("Valid values: PrimaryOnly, PrimaryThenFallback, FanOutCompare, TandemValidate, SecondOpinion.");
             return true;
         }
 
@@ -720,13 +720,13 @@ internal static class McpClientConsoleChatRunner
         output.WriteLine("  /tool <name> [json]");
         output.WriteLine("  /read <json>");
         output.WriteLine("  /write <json>");
-        output.WriteLine("  /patch <json>");
-        output.WriteLine("  /edit <json>");
+        output.WriteLine("  /patch <json with message>");
+        output.WriteLine("  /edit <json with message>");
         output.WriteLine("  /compact [instructions]");
         output.WriteLine("  /provider <id> | /provider clear");
         output.WriteLine("  /model <name> | /model clear");
         output.WriteLine("  /system <prompt> | /system clear");
-        output.WriteLine("  /strategy <PrimaryOnly|PrimaryThenFallback|FanOutCompare> | /strategy clear");
+        output.WriteLine("  /strategy <PrimaryOnly|PrimaryThenFallback|FanOutCompare|TandemValidate|SecondOpinion> | /strategy clear");
         output.WriteLine("  /fallback <id[,id...]> | /fallback clear");
         output.WriteLine();
         output.WriteLine("Type a message to send it through inference.generate.");
@@ -742,9 +742,11 @@ internal static class McpClientConsoleChatRunner
                 output.WriteLine(text.Text);
             }
         }
+
+        McpClientConsoleOutput.WriteProviderStartHintIfNeeded(output, result);
     }
 
-    private static void PrintAssistantMessage(TextWriter output, string text, string? providerId, string? model, string? finishReason)
+    private static void PrintAssistantMessage(TextWriter output, string text, AssistantMetadata metadata)
     {
         output.WriteLine("assistant>");
 
@@ -754,39 +756,16 @@ internal static class McpClientConsoleChatRunner
             output.WriteLine($"  {line}");
         }
 
-        if (!string.IsNullOrWhiteSpace(providerId) || !string.IsNullOrWhiteSpace(model) || !string.IsNullOrWhiteSpace(finishReason))
+        var statusLine = BuildStatusLine(metadata);
+        if (!string.IsNullOrWhiteSpace(statusLine))
         {
-            output.Write("  [");
-            var first = true;
+            output.WriteLine($"  [{statusLine}]");
+        }
 
-            if (!string.IsNullOrWhiteSpace(providerId))
-            {
-                output.Write($"provider={providerId}");
-                first = false;
-            }
-
-            if (!string.IsNullOrWhiteSpace(model))
-            {
-                if (!first)
-                {
-                    output.Write(", ");
-                }
-
-                output.Write($"model={model}");
-                first = false;
-            }
-
-            if (!string.IsNullOrWhiteSpace(finishReason))
-            {
-                if (!first)
-                {
-                    output.Write(", ");
-                }
-
-                output.Write($"finish={finishReason}");
-            }
-
-            output.WriteLine("]");
+        var chainLine = BuildChainLine(metadata);
+        if (!string.IsNullOrWhiteSpace(chainLine))
+        {
+            output.WriteLine($"  [{chainLine}]");
         }
 
         output.WriteLine();
@@ -907,17 +886,236 @@ internal static class McpClientConsoleChatRunner
         return builder.Length == 0 ? null : builder.ToString();
     }
 
-    private static (string? ProviderId, string? Model, string? FinishReason) ExtractAssistantMetadata(ToolCallResult result)
+    private static AssistantMetadata ExtractAssistantMetadata(ToolCallResult result)
     {
         if (result.StructuredContent is not { } structuredContent || structuredContent.ValueKind != JsonValueKind.Object)
         {
-            return (null, null, null);
+            return AssistantMetadata.Empty;
         }
 
         var providerId = TryGetString(structuredContent, "providerId");
         var model = TryGetString(structuredContent, "model");
         var finishReason = TryGetString(structuredContent, "finishReason");
-        return (providerId, model, finishReason);
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (structuredContent.TryGetProperty("metadata", out var metadataElement) &&
+            metadataElement.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in metadataElement.EnumerateObject())
+            {
+                if (property.Value.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                var value = property.Value.GetString();
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                metadata[property.Name] = value;
+            }
+        }
+
+        return new AssistantMetadata(providerId, model, finishReason, metadata);
+    }
+
+    private static string? BuildStatusLine(AssistantMetadata metadata)
+    {
+        var fragments = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(metadata.ProviderId))
+        {
+            fragments.Add($"provider={metadata.ProviderId}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata.Model))
+        {
+            fragments.Add($"model={metadata.Model}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata.FinishReason))
+        {
+            fragments.Add($"finish={metadata.FinishReason}");
+        }
+
+        AppendMetricFragments(fragments, metadata.Metadata, string.Empty);
+        return fragments.Count == 0 ? null : string.Join(", ", fragments);
+    }
+
+    private static string? BuildChainLine(AssistantMetadata metadata)
+    {
+        if (TryGetString(metadata.Metadata, "secondOpinion.status") is { } secondOpinionStatus)
+        {
+            var fragments = new List<string>
+            {
+                $"secondOpinion status={secondOpinionStatus}"
+            };
+
+            AppendModelFragment(
+                fragments,
+                "primary",
+                TryGetString(metadata.Metadata, "secondOpinion.primaryProviderId"),
+                TryGetString(metadata.Metadata, "secondOpinion.primaryModel"),
+                metadata.Metadata,
+                "secondOpinion.primary.",
+                includeMetrics: true);
+
+            if (TryGetString(metadata.Metadata, "secondOpinion.reviewerProviderId") is { } reviewerProviderId &&
+                TryGetString(metadata.Metadata, "secondOpinion.reviewerModel") is { } reviewerModel)
+            {
+                AppendModelFragment(
+                    fragments,
+                    "reviewer",
+                    reviewerProviderId,
+                    reviewerModel,
+                    metadata.Metadata,
+                    "secondOpinion.reviewer.",
+                    includeMetrics: false);
+            }
+            else if (TryGetString(metadata.Metadata, "secondOpinion.reviewerAttemptedProviderId") is { } reviewerAttemptedProviderId)
+            {
+                fragments.Add($"reviewerAttempted={reviewerAttemptedProviderId}");
+            }
+
+            if (TryGetString(metadata.Metadata, "secondOpinion.reviewError") is { } reviewError)
+            {
+                fragments.Add($"reviewError={reviewError}");
+            }
+
+            return fragments.Count > 1 ? string.Join(", ", fragments) : null;
+        }
+
+        if (TryGetString(metadata.Metadata, "tandem.status") is { } tandemStatus)
+        {
+            var fragments = new List<string>
+            {
+                $"tandem status={tandemStatus}"
+            };
+
+            AppendModelFragment(
+                fragments,
+                "primary",
+                TryGetString(metadata.Metadata, "tandem.primaryProviderId"),
+                TryGetString(metadata.Metadata, "tandem.primaryModel"),
+                metadata.Metadata,
+                "tandem.primary.",
+                includeMetrics: true);
+
+            if (TryGetString(metadata.Metadata, "tandem.secondaryProviderId") is { } secondaryProviderId &&
+                TryGetString(metadata.Metadata, "tandem.secondaryModel") is { } secondaryModel)
+            {
+                AppendModelFragment(
+                    fragments,
+                    "secondary",
+                    secondaryProviderId,
+                    secondaryModel,
+                    metadata.Metadata,
+                    "tandem.secondary.",
+                    includeMetrics: true);
+            }
+
+            if (TryGetString(metadata.Metadata, "tandem.validatorProviderId") is { } validatorProviderId)
+            {
+                var validatorModel = TryGetString(metadata.Metadata, "tandem.validatorModel");
+                if (!string.IsNullOrWhiteSpace(validatorModel))
+                {
+                    fragments.Add($"validator={validatorProviderId}/{validatorModel}");
+                }
+                else
+                {
+                    fragments.Add($"validator={validatorProviderId}");
+                }
+            }
+
+            if (TryGetString(metadata.Metadata, "tandem.validatorProviderId") is null &&
+                TryGetString(metadata.Metadata, "tandem.validatorModel") is { } attemptedValidatorModel)
+            {
+                fragments.Add($"validatorModel={attemptedValidatorModel}");
+            }
+
+            return fragments.Count > 1 ? string.Join(", ", fragments) : null;
+        }
+
+        return null;
+    }
+
+    private static void AppendModelFragment(
+        ICollection<string> fragments,
+        string label,
+        string? providerId,
+        string? model,
+        IReadOnlyDictionary<string, string> metadata,
+        string metricPrefix,
+        bool includeMetrics)
+    {
+        var descriptor = BuildProviderModelDescriptor(providerId, model);
+        if (includeMetrics)
+        {
+            var metrics = BuildMetricFragment(metadata, metricPrefix);
+            if (!string.IsNullOrWhiteSpace(metrics))
+            {
+                descriptor = $"{descriptor} ({metrics})";
+            }
+        }
+
+        fragments.Add($"{label}={descriptor}");
+    }
+
+    private static string BuildProviderModelDescriptor(string? providerId, string? model)
+    {
+        if (string.IsNullOrWhiteSpace(providerId) && string.IsNullOrWhiteSpace(model))
+        {
+            return "unknown";
+        }
+
+        if (string.IsNullOrWhiteSpace(providerId))
+        {
+            return model!.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return providerId.Trim();
+        }
+
+        return $"{providerId.Trim()}/{model.Trim()}";
+    }
+
+    private static string? BuildMetricFragment(
+        IReadOnlyDictionary<string, string> metadata,
+        string prefix)
+    {
+        var fragments = new List<string>();
+        AppendMetricFragments(fragments, metadata, prefix);
+        return fragments.Count == 0 ? null : string.Join(", ", fragments);
+    }
+
+    private static void AppendMetricFragments(
+        ICollection<string> fragments,
+        IReadOnlyDictionary<string, string> metadata,
+        string prefix)
+    {
+        AppendMetricFragment(fragments, metadata, prefix + "generationElapsedMilliseconds", "elapsed", suffix: "ms");
+        AppendMetricFragment(fragments, metadata, prefix + "loadDurationMilliseconds", "load", suffix: "ms");
+        AppendMetricFragment(fragments, metadata, prefix + "tokensPerSecond", "tps");
+        AppendMetricFragment(fragments, metadata, prefix + "inputTokensPerSecond", "inputTps");
+        AppendMetricFragment(fragments, metadata, prefix + "outputTokensPerSecond", "outputTps");
+    }
+
+    private static void AppendMetricFragment(
+        ICollection<string> fragments,
+        IReadOnlyDictionary<string, string> metadata,
+        string key,
+        string label,
+        string? suffix = null)
+    {
+        if (!metadata.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        fragments.Add(string.IsNullOrWhiteSpace(suffix) ? $"{label}={value}" : $"{label}={value}{suffix}");
     }
 
     private static bool TryParseRoutingStrategy(string value, out InferenceRoutingStrategy strategy)
@@ -1002,7 +1200,9 @@ internal static class McpClientConsoleChatRunner
 
     private static int WriteFailure<T>(TextWriter error, Fin<T> value)
     {
-        error.WriteLine(McpClientConsoleResultHelpers.GetError(value));
+        var message = McpClientConsoleResultHelpers.GetError(value);
+        error.WriteLine(message);
+        McpClientConsoleOutput.WriteProviderStartHintIfNeeded(error, message);
         return 1;
     }
 
@@ -1162,6 +1362,22 @@ internal static class McpClientConsoleChatRunner
         }
 
         return property.GetString();
+    }
+
+    private static string? TryGetString(IReadOnlyDictionary<string, string> metadata, string key)
+    {
+        return metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : null;
+    }
+
+    private sealed record AssistantMetadata(
+        string? ProviderId,
+        string? Model,
+        string? FinishReason,
+        IReadOnlyDictionary<string, string> Metadata)
+    {
+        public static readonly AssistantMetadata Empty = new(null, null, null, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
     }
 
     private static bool TryGetBoolean(JsonElement element, string propertyName)

@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "MCPServer.ChatLauncher": {
+      "commandName": "Project"
+    }
+  }
+}

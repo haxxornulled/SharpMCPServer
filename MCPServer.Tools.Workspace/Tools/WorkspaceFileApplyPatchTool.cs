@@ -64,10 +64,16 @@ public sealed class WorkspaceFileApplyPatchTool : IMcpTool
             return Fin.Succ<ToolCallResult>(ToolCallResult.Text($"{WorkspaceToolNames.FilesApplyPatch} requires a string patch.", isError: true));
         }
 
+        if (WorkspaceToolArguments.RequireString(request.Message, "message", WorkspaceToolNames.FilesApplyPatch).IsFail)
+        {
+            return Fin.Succ<ToolCallResult>(ToolCallResult.Text($"{WorkspaceToolNames.FilesApplyPatch} requires a message describing the patch.", isError: true));
+        }
+
         var result = await _workspaceFileService.ApplyPatchAsync(
             request.RootName.Trim(),
             request.RelativePath.Trim(),
             request.Patch,
+            request.Message,
             cancellationToken).ConfigureAwait(false);
 
         return result.Match<Fin<ToolCallResult>>(

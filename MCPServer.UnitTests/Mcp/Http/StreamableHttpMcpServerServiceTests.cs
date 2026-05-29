@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Autofac;
 using LanguageExt;
 using MCPServer.Application;
@@ -169,6 +170,42 @@ public sealed class StreamableHttpMcpServerServiceTests
     }
 
     [Fact]
+    public async Task StartAsync_Falls_Back_From_Blocked_Default_Port()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var blockedPortListener = TryStartBlockedPortListener();
+        var logger = new TestLogger<StreamableHttpMcpServerService>();
+
+        using var container = BuildContainer(StreamableHttpMcpTransportOptions.DefaultLoopbackPort, logger);
+        var hostedService = ResolveHttpHostedService(container);
+
+        await hostedService.StartAsync(cancellationToken);
+
+        try
+        {
+            var fallbackWarning = await WaitForLogEntryAsync(
+                logger,
+                entry => entry.LogLevel == LogLevel.Warning &&
+                    entry.Message.Contains("Falling back to loopback port", StringComparison.OrdinalIgnoreCase),
+                cancellationToken);
+
+            var fallbackPort = ExtractPort(fallbackWarning.Message, @"loopback port (\d+)");
+            Assert.NotEqual(StreamableHttpMcpTransportOptions.DefaultLoopbackPort, fallbackPort);
+
+            await WaitForPortAsync(fallbackPort, cancellationToken);
+
+            using var client = CreateHttpClient(fallbackPort);
+            using var response = await client.GetAsync(string.Empty, cancellationToken);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            blockedPortListener?.Stop();
+        }
+    }
+
+    [Fact]
     public async Task Live_Http_Stream_Replays_From_Last_Event_Id()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -293,7 +330,7 @@ public sealed class StreamableHttpMcpServerServiceTests
         }
     }
 
-    private static IContainer BuildContainer(int port)
+    private static IContainer BuildContainer(int port, ILogger<StreamableHttpMcpServerService>? logger = null)
     {
         var builder = new ContainerBuilder();
         builder.RegisterGeneric(typeof(NullLogger<>)).As(typeof(ILogger<>)).SingleInstance();
@@ -311,6 +348,13 @@ public sealed class StreamableHttpMcpServerServiceTests
         })
             .AsSelf()
             .SingleInstance();
+
+        if (logger is not null)
+        {
+            builder.RegisterInstance(logger)
+                .As<ILogger<StreamableHttpMcpServerService>>()
+                .SingleInstance();
+        }
 
         builder.RegisterInstance(new StdioMcpTransportOptions
         {
@@ -504,6 +548,60 @@ public sealed class StreamableHttpMcpServerServiceTests
         }
     }
 
+    private static TcpListener? TryStartBlockedPortListener()
+    {
+        try
+        {
+            var listener = new TcpListener(IPAddress.Loopback, StreamableHttpMcpTransportOptions.DefaultLoopbackPort);
+            listener.Start();
+            return listener;
+        }
+        catch (SocketException ex) when (
+            ex.SocketErrorCode is SocketError.AddressAlreadyInUse or
+            SocketError.AccessDenied or
+            SocketError.AddressNotAvailable)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<LogEntry> WaitForLogEntryAsync(
+        TestLogger<StreamableHttpMcpServerService> logger,
+        Func<LogEntry, bool> predicate,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var entry = logger.TryGetEntries(predicate).FirstOrDefault();
+            if (entry is not null)
+            {
+                return entry;
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                throw new TimeoutException("Timed out waiting for the expected log entry.");
+            }
+
+            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static int ExtractPort(string message, string pattern)
+    {
+        var match = Regex.Match(message, pattern, RegexOptions.CultureInvariant);
+        if (!match.Success || !int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port))
+        {
+            throw new InvalidOperationException($"Unable to extract a port from log message '{message}'.");
+        }
+
+        return port;
+    }
+
     private static async Task<int> GetAvailablePortAsync(CancellationToken cancellationToken)
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -514,6 +612,60 @@ public sealed class StreamableHttpMcpServerServiceTests
         await Task.Yield();
         cancellationToken.ThrowIfCancellationRequested();
         return port;
+    }
+
+    private sealed record LogEntry(LogLevel LogLevel, EventId EventId, string Message, Exception? Exception);
+
+    private sealed class TestLogger<T> : ILogger<T>
+    {
+        private readonly object _gate = new();
+        private readonly List<LogEntry> _entries = new();
+
+        public IDisposable BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return NoopScope.Instance;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            ArgumentNullException.ThrowIfNull(formatter);
+
+            var message = formatter(state, exception);
+            lock (_gate)
+            {
+                _entries.Add(new LogEntry(logLevel, eventId, message, exception));
+            }
+        }
+
+        public IReadOnlyList<LogEntry> TryGetEntries(Func<LogEntry, bool> predicate)
+        {
+            ArgumentNullException.ThrowIfNull(predicate);
+
+            lock (_gate)
+            {
+                return _entries.Where(predicate).ToArray();
+            }
+        }
+
+        private sealed class NoopScope : IDisposable
+        {
+            public static NoopScope Instance { get; } = new();
+
+            public void Dispose()
+            {
+            }
+        }
     }
 
     private static async Task<SseEvent> ReadNextSseEventAsync(StreamReader reader, CancellationToken cancellationToken)

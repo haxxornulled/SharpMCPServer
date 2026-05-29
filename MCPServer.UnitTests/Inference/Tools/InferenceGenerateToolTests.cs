@@ -65,6 +65,88 @@ public sealed class InferenceGenerateToolTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RoutesPrompt_With_TandemValidate_Strategy()
+    {
+        var router = new FakeInferenceRouter(request =>
+        {
+            Assert.NotNull(request.RoutingHint);
+            Assert.Equal(InferenceRoutingStrategy.TandemValidate, request.RoutingHint!.Strategy);
+            Assert.Equal("lmstudio", request.RoutingHint.PreferredProviderId);
+            Assert.Equal(["ollama", "anthropic"], request.RoutingHint.FallbackProviderIds);
+            return new InferenceResponse(
+                "lmstudio",
+                "local-model",
+                "hi there",
+                "stop");
+        });
+
+        var tool = new InferenceGenerateTool(router);
+        using var argumentsDocument = JsonDocument.Parse("""
+        {
+          "prompt": "hello",
+          "providerId": "lmstudio",
+          "strategy": "TandemValidate",
+          "fallbackProviderIds": ["ollama", "anthropic"]
+        }
+        """);
+        var arguments = argumentsDocument.RootElement.Clone();
+
+        var result = await tool.ExecuteAsync(arguments, CancellationToken.None);
+
+        Assert.True(result.IsSucc);
+
+        var toolResult = result.Match(
+            Succ: static value => value,
+            Fail: static error => throw new Xunit.Sdk.XunitException(error.Message));
+
+        Assert.False(toolResult.IsError);
+        var content = Assert.Single(toolResult.Content);
+        var textContent = Assert.IsType<TextToolContent>(content);
+        Assert.Equal("hi there", textContent.Text);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RoutesPrompt_With_SecondOpinion_Strategy()
+    {
+        var router = new FakeInferenceRouter(request =>
+        {
+            Assert.NotNull(request.RoutingHint);
+            Assert.Equal(InferenceRoutingStrategy.SecondOpinion, request.RoutingHint!.Strategy);
+            Assert.Equal("lmstudio", request.RoutingHint.PreferredProviderId);
+            Assert.Equal(["ollama", "anthropic"], request.RoutingHint.FallbackProviderIds);
+            return new InferenceResponse(
+                "lmstudio",
+                "local-model",
+                "hi there",
+                "stop");
+        });
+
+        var tool = new InferenceGenerateTool(router);
+        using var argumentsDocument = JsonDocument.Parse("""
+        {
+          "prompt": "hello",
+          "providerId": "lmstudio",
+          "strategy": "SecondOpinion",
+          "fallbackProviderIds": ["ollama", "anthropic"]
+        }
+        """);
+        var arguments = argumentsDocument.RootElement.Clone();
+
+        var result = await tool.ExecuteAsync(arguments, CancellationToken.None);
+
+        Assert.True(result.IsSucc);
+
+        var toolResult = result.Match(
+            Succ: static value => value,
+            Fail: static error => throw new Xunit.Sdk.XunitException(error.Message));
+
+        Assert.False(toolResult.IsError);
+        var content = Assert.Single(toolResult.Content);
+        var textContent = Assert.IsType<TextToolContent>(content);
+        Assert.Equal("hi there", textContent.Text);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RoutesMessages_And_ReturnsStructuredProviderMetadata()
     {
         var router = new FakeInferenceRouter(request =>

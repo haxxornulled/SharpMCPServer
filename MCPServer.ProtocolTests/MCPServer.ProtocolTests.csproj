@@ -9,9 +9,18 @@
 
   <ItemGroup>
     <PackageReference Include="Autofac" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Abstractions\MCPServer.AgentRouter.Abstractions.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Application\MCPServer.AgentRouter.Application.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Domain\MCPServer.AgentRouter.Domain.csproj" />
     <ProjectReference Include="..\MCPServer.Application\MCPServer.Application.csproj" />
     <ProjectReference Include="..\MCPServer.Domain\MCPServer.Domain.csproj" />
+    <ProjectReference Include="..\MCPServer.Inference.Abstractions\MCPServer.Inference.Abstractions.csproj" />
     <ProjectReference Include="..\MCPServer.Infrastructure\MCPServer.Infrastructure.csproj" />
+    <ProjectReference Include="..\MCPServer.Ssh\MCPServer.Ssh.csproj" />
+    <ProjectReference Include="..\MCPServer.Tools.Inference\MCPServer.Tools.Inference.csproj" />
+    <ProjectReference Include="..\MCPServer.Tools.Ssh\MCPServer.Tools.Ssh.csproj" />
+    <ProjectReference Include="..\MCPServer.Tools.Workspace\MCPServer.Tools.Workspace.csproj" />
+    <ProjectReference Include="..\MCPServer.Workspace\MCPServer.Workspace.csproj" />
   </ItemGroup>
 
 </Project>

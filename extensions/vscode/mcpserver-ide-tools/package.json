@@ -1,8 +1,8 @@
 {
   "name": "mcpserver-ide-tools",
   "displayName": "MCPServer IDE Tools",
-  "description": "Launch the MCPServer chat console and host from VS Code using the repository's debug profiles.",
-  "version": "0.1.0",
+  "description": "Launch the MCPServer chat console and workspace actions from VS Code using repository-owned workflows.",
+  "version": "0.1.6",
   "publisher": "haxxornulled",
   "license": "MIT",
   "repository": {
@@ -27,31 +27,91 @@
     "launch-profile"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onCommand:mcpserver.openChatConsole",
-    "onCommand:mcpserver.openHost",
-    "onCommand:mcpserver.showWorkspaceRoot"
+    "onCommand:mcpserver.showWorkspaceRoot",
+    "onCommand:mcpserver.copyWorkspaceRoot",
+    "onCommand:mcpserver.openWorkspaceRootInExplorer",
+    "onCommand:mcpserver.refreshMcpServerState",
+    "onCommand:mcpserver.showWorkspaceActions",
+    "onCommand:mcpserver.configureInferenceRouting",
+    "onCommand:mcpserver.configureInferenceProviderModel",
+    "onCommand:mcpserver.configureInferenceProviderPriority",
+    "onCommand:mcpserver.configureInferenceProviderPerformance",
+    "onCommand:mcpserver.configureInferenceProviderApiKey",
+    "onView:mcpserver.workspace"
   ],
   "main": "./out/extension.js",
   "files": [
     "out/**",
+    "resources/**",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
     "package.json"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "mcpserver",
+          "title": "MCPServer",
+          "icon": "resources/mcpserver.svg"
+        }
+      ]
+    },
+    "views": {
+      "mcpserver": [
+        {
+          "id": "mcpserver.workspace",
+          "name": "Workspace Bubble"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "mcpserver.openChatConsole",
         "title": "MCPServer: Open Chat Console"
       },
       {
-        "command": "mcpserver.openHost",
-        "title": "MCPServer: Open Host"
-      },
-      {
         "command": "mcpserver.showWorkspaceRoot",
         "title": "MCPServer: Show Workspace Root"
+      },
+      {
+        "command": "mcpserver.copyWorkspaceRoot",
+        "title": "MCPServer: Copy Workspace Root"
+      },
+      {
+        "command": "mcpserver.openWorkspaceRootInExplorer",
+        "title": "MCPServer: Open Workspace Root in Explorer"
+      },
+      {
+        "command": "mcpserver.refreshMcpServerState",
+        "title": "MCPServer: Refresh MCPServer State"
+      },
+      {
+        "command": "mcpserver.showWorkspaceActions",
+        "title": "MCPServer: Workspace Actions"
+      },
+      {
+        "command": "mcpserver.configureInferenceProviderModel",
+        "title": "MCPServer: Configure Inference Provider Model"
+      },
+      {
+        "command": "mcpserver.configureInferenceRouting",
+        "title": "MCPServer: Configure Inference Routing"
+      },
+      {
+        "command": "mcpserver.configureInferenceProviderPriority",
+        "title": "MCPServer: Configure Inference Provider Priority"
+      },
+      {
+        "command": "mcpserver.configureInferenceProviderPerformance",
+        "title": "MCPServer: Configure Inference Provider Performance"
+      },
+      {
+        "command": "mcpserver.configureInferenceProviderApiKey",
+        "title": "MCPServer: Configure Inference Provider API Key"
       }
     ]
   },

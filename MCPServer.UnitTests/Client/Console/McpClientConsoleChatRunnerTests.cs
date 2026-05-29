@@ -91,6 +91,50 @@ public sealed class McpClientConsoleChatRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_Prints_Performance_Metadata_And_Second_Opinion_Summary()
+    {
+        var options = ConsoleOptions.Parse([
+            "--transport",
+            "stdio",
+            "--server-path",
+            "dotnet",
+            "--working-directory",
+            ".",
+            "--chat",
+            "--provider",
+            "lmstudio"
+        ]);
+
+        var session = new FakeMcpClientSession
+        {
+            IncludeInferencePerformanceMetadata = true
+        };
+
+        using var input = new StringReader("hello\n/exit\n");
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await McpClientConsoleChatRunner.RunAsync(session, options, input, output, error, CancellationToken.None);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("assistant>", stdout, StringComparison.Ordinal);
+        Assert.Contains("provider=openai", stdout, StringComparison.Ordinal);
+        Assert.Contains("model=gpt-5.5", stdout, StringComparison.Ordinal);
+        Assert.Contains("elapsed=950ms", stdout, StringComparison.Ordinal);
+        Assert.Contains("load=120ms", stdout, StringComparison.Ordinal);
+        Assert.Contains("tps=31.25", stdout, StringComparison.Ordinal);
+        Assert.Contains("inputTps=8.5", stdout, StringComparison.Ordinal);
+        Assert.Contains("outputTps=22.75", stdout, StringComparison.Ordinal);
+        Assert.Contains("secondOpinion status=applied", stdout, StringComparison.Ordinal);
+        Assert.Contains("primary=lmstudio/gemma4:latest", stdout, StringComparison.Ordinal);
+        Assert.Contains("elapsed=250ms", stdout, StringComparison.Ordinal);
+        Assert.Contains("load=40ms", stdout, StringComparison.Ordinal);
+        Assert.Contains("tps=120.5", stdout, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
     public async Task RunAsync_Supports_Generic_Tool_Calls_And_Transcript_Compaction()
     {
         var checkoutRoot = McpClientConsoleChatRunner.ResolveCheckoutRoot(Environment.CurrentDirectory);
@@ -259,7 +303,7 @@ public sealed class McpClientConsoleChatRunnerTests
         ]);
 
         var session = new FakeMcpClientSession();
-        using var input = new StringReader("/tools workspace.\n/search {\"rootName\":\"workspace\",\"query\":\"README\",\"caseSensitive\":false}\n/read {\"rootName\":\"workspace\",\"relativePath\":\"README.md\"}\n/edit {\"rootName\":\"workspace\",\"relativePath\":\"README.md\",\"patch\":\"@@ -1 +1 @@\\nHello\"}\n/exit\n");
+        using var input = new StringReader("/tools workspace.\n/search {\"rootName\":\"workspace\",\"query\":\"README\",\"caseSensitive\":false}\n/read {\"rootName\":\"workspace\",\"relativePath\":\"README.md\"}\n/edit {\"rootName\":\"workspace\",\"relativePath\":\"README.md\",\"patch\":\"@@ -1 +1 @@\\nHello\",\"message\":\"Replace README greeting.\"}\n/exit\n");
         using var output = new StringWriter();
         using var error = new StringWriter();
 
@@ -286,6 +330,7 @@ public sealed class McpClientConsoleChatRunnerTests
         Assert.Equal("workspace", session.CallArguments[3]!.Value.GetProperty("rootName").GetString());
         Assert.Equal("README.md", session.CallArguments[3]!.Value.GetProperty("relativePath").GetString());
         Assert.Contains("@@ -1 +1 @@", session.CallArguments[3]!.Value.GetProperty("patch").GetString(), StringComparison.Ordinal);
+        Assert.Equal("Replace README greeting.", session.CallArguments[3]!.Value.GetProperty("message").GetString());
 
         var stdout = output.ToString();
         Assert.Contains("Tools exposed by server matching 'workspace.':", stdout, StringComparison.Ordinal);
@@ -337,6 +382,8 @@ public sealed class McpClientConsoleChatRunnerTests
         public List<JsonElement?> CallArguments { get; } = [];
 
         public bool FailWorkspaceRootsList { get; init; }
+
+        public bool IncludeInferencePerformanceMetadata { get; init; }
 
         private int _inferenceGenerateCalls;
 
@@ -407,26 +454,26 @@ public sealed class McpClientConsoleChatRunnerTests
             if (string.Equals(name, "inference.generate", StringComparison.OrdinalIgnoreCase))
             {
                 _inferenceGenerateCalls++;
+                var responseProviderId = IncludeInferencePerformanceMetadata ? "openai" : "lmstudio";
+                var responseModel = IncludeInferencePerformanceMetadata ? "gpt-5.5" : "gemma4:latest";
                 return _inferenceGenerateCalls switch
                 {
                     1 => ValueTask.FromResult(Fin.Succ(ToolCallResult.Text(
                         "Compact summary",
-                        structuredContent: CreateStructuredContent("""
-                        {
-                          "providerId": "lmstudio",
-                          "model": "gemma4:latest",
-                          "finishReason": "stop"
-                        }
-                        """)))),
+                        structuredContent: CreateInferenceStructuredContent(
+                            responseProviderId,
+                            responseModel,
+                            "stop",
+                            IncludeInferencePerformanceMetadata ? "Compact summary" : null,
+                            IncludeInferencePerformanceMetadata)))),
                     _ => ValueTask.FromResult(Fin.Succ(ToolCallResult.Text(
                         "hi there",
-                        structuredContent: CreateStructuredContent("""
-                        {
-                          "providerId": "lmstudio",
-                          "model": "gemma4:latest",
-                          "finishReason": "stop"
-                        }
-                        """))))
+                        structuredContent: CreateInferenceStructuredContent(
+                            responseProviderId,
+                            responseModel,
+                            "stop",
+                            IncludeInferencePerformanceMetadata ? "hi there" : null,
+                            IncludeInferencePerformanceMetadata)))),
                 };
             }
 
@@ -521,6 +568,60 @@ public sealed class McpClientConsoleChatRunnerTests
         private static JsonElement CreateStructuredContent(string json)
         {
             using var document = JsonDocument.Parse(json);
+            return document.RootElement.Clone();
+        }
+
+        private static JsonElement CreateInferenceStructuredContent(
+            string providerId,
+            string model,
+            string finishReason,
+            string? content,
+            bool includePerformanceMetadata)
+        {
+            var buffer = new ArrayBufferWriter<byte>();
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                writer.WriteStartObject();
+                writer.WriteString("providerId", providerId);
+                writer.WriteString("model", model);
+                writer.WriteString("finishReason", finishReason);
+
+                if (includePerformanceMetadata)
+                {
+                    writer.WritePropertyName("metadata");
+                    writer.WriteStartObject();
+                    writer.WriteString("generationElapsedMilliseconds", "950");
+                    writer.WriteString("loadDurationMilliseconds", "120");
+                    writer.WriteString("tokensPerSecond", "31.25");
+                    writer.WriteString("inputTokensPerSecond", "8.5");
+                    writer.WriteString("outputTokensPerSecond", "22.75");
+                    writer.WriteString("secondOpinion.status", "applied");
+                    writer.WriteString("secondOpinion.primaryProviderId", "lmstudio");
+                    writer.WriteString("secondOpinion.primaryModel", "gemma4:latest");
+                    writer.WriteString("secondOpinion.primary.generationElapsedMilliseconds", "250");
+                    writer.WriteString("secondOpinion.primary.loadDurationMilliseconds", "40");
+                    writer.WriteString("secondOpinion.primary.tokensPerSecond", "120.5");
+                    writer.WriteString("secondOpinion.primary.inputTokensPerSecond", "90.5");
+                    writer.WriteString("secondOpinion.primary.outputTokensPerSecond", "30.0");
+                    writer.WriteString("secondOpinion.reviewerProviderId", providerId);
+                    writer.WriteString("secondOpinion.reviewerModel", model);
+                    writer.WriteString("secondOpinion.reviewer.generationElapsedMilliseconds", "950");
+                    writer.WriteString("secondOpinion.reviewer.loadDurationMilliseconds", "120");
+                    writer.WriteString("secondOpinion.reviewer.tokensPerSecond", "31.25");
+                    writer.WriteString("secondOpinion.reviewer.inputTokensPerSecond", "8.5");
+                    writer.WriteString("secondOpinion.reviewer.outputTokensPerSecond", "22.75");
+                    writer.WriteEndObject();
+                }
+
+                if (!string.IsNullOrWhiteSpace(content))
+                {
+                    writer.WriteString("content", content);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            using var document = JsonDocument.Parse(buffer.WrittenMemory);
             return document.RootElement.Clone();
         }
 

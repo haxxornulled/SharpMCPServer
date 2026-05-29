@@ -68,7 +68,12 @@ public sealed class ServerInfoTool : IMcpTool
                 "notifications/tasks/status",
                 "client.sample",
                 "client.elicit.form",
-                "client.elicit.url"
+                "client.elicit.url",
+                AgentToolNames.Create,
+                AgentToolNames.SubagentCreate,
+                AgentToolNames.Status,
+                AgentToolNames.Approve,
+                AgentToolNames.Cancel
             }
         };
 

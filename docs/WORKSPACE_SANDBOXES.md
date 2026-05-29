@@ -22,7 +22,7 @@ The current tool set is intentionally small:
 - `workspace.files.read`
 - `workspace.files.search`
 - `workspace.files.write`
-- `workspace.files.applyPatch`
+- `workspace.files.applyPatch` requires a message that explains the patch
 
 That is enough for a VS extension or agent workspace to inspect roots, create a disposable sandbox, edit inside it, and tear it down again.
 
@@ -54,28 +54,47 @@ That shared registry is part of the bubble boundary, not a convenience cache.
 ## Example flow
 
 ```mermaid
-flowchart LR
-    Stdio["stdio transport"]
-    Http["Streamable HTTP transport"]
-    Host["MCPServer.Host"]
-    Workspace["MCPServer.Workspace"]
-    Tools["MCPServer.Tools.Workspace"]
-    Registry["SqliteWorkspaceSandboxRegistry"]
-    Db["workspace.db"]
+flowchart TB
+    classDef transport fill:#eef2ff,stroke:#3b82f6,color:#1e3a8a,stroke-width:1.5px;
+    classDef host fill:#ecfeff,stroke:#06b6d4,color:#083344,stroke-width:1.5px;
+    classDef workspace fill:#fff7ed,stroke:#f97316,color:#7c2d12,stroke-width:1.5px;
+    classDef storage fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-width:1.5px;
+
+    subgraph Transports["Client transports"]
+        direction LR
+        Stdio["stdio transport"]:::transport
+        Http["Streamable HTTP transport"]:::transport
+    end
+
+    subgraph Server["Shared host path"]
+        direction TB
+        Host["MCPServer.Host"]:::host
+        Tools["MCPServer.Tools.Workspace"]:::workspace
+        Workspace["MCPServer.Workspace"]:::workspace
+
+        Host --> Tools
+        Host --> Workspace
+        Tools --> Workspace
+    end
+
+    subgraph Persistence["Shared SQLite registry"]
+        direction TB
+        Registry["SqliteWorkspaceSandboxRegistry"]:::storage
+        Db["workspace.db"]:::storage
+
+        Registry --> Db
+    end
 
     Stdio --> Host
     Http --> Host
-    Host --> Tools
-    Host --> Workspace
-    Tools --> Workspace
-    Workspace --> Registry --> Db
+    Workspace --> Registry
 ```
 
 The same registry and the same tool logic are used regardless of transport.
 
 ## Release and run notes
 
-- Configure `McpWorkspace:ApprovalToken` before using sandbox create or delete operations.
+- Configure `McpWorkspace:ApprovalToken` on the host before using sandbox create or delete operations. The sandbox tools consume that host-side token internally and do not require the model or caller to pass it through the tool request.
 - Keep the SQLite database on local storage owned by the host machine.
 - If you move the database path, move it deliberately and keep the workspace roots aligned with the same trust boundary.
 - Use `docs/INSTALL.md` for the .NET-first release flow and `README.md` for the quick-start commands.

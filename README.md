@@ -23,6 +23,7 @@ If a feature weakens those boundaries, it is the wrong feature.
 ## Workspace map
 
 - `MCPServer.Host` is the primary MCP server host.
+- `MCPServer.Application` hosts the protocol-facing MCP tool, prompt, and resource surfaces, including the agent lifecycle tools.
 - `MCPServer.Host.Sidecar` is the sidecar entry point for host composition.
 - `MCPServer.Workspace` owns workspace roots, sandbox registry persistence, and workspace file policy.
 - `MCPServer.Tools.Workspace` exposes the workspace MCP tool surface.
@@ -33,7 +34,7 @@ If a feature weakens those boundaries, it is the wrong feature.
 - `MCPServer.Ssh` and `MCPServer.Tools.Ssh` own SSH policy, runtime, and MCP tool exposure.
 - `python/` contains the `ctypes` wrapper for the NativeAOT bridge.
 - `scripts/Sync-PythonBridge.ps1` publishes the native bridge, syncs the Python package payload, and can build the wheel.
-- The Visual Studio and VS Code extension scaffolds under `extensions/` are thin shells over the same bubble: they launch the console, host, and workspace dashboard, but they do not own the real behavior.
+- The Visual Studio and VS Code extension scaffolds under `extensions/` are thin shells over the same bubble: they surface the console, host, workspace dashboard, and the repo-owned workspace / inference control surfaces, but they do not own the real behavior.
 
 ## Workspace sandboxes
 
@@ -41,7 +42,7 @@ Workspace editing is workspace-root scoped and shared across stdio and Streamabl
 
 - `workspace.roots.list` exposes the approved roots.
 - `workspace.sandboxes.list`, `workspace.sandboxes.create`, and `workspace.sandboxes.delete` manage durable sandboxes.
-- `workspace.files.read`, `workspace.files.search`, `workspace.files.write`, and `workspace.files.applyPatch` operate inside approved roots and sandboxes only.
+- `workspace.files.read`, `workspace.files.search`, `workspace.files.write`, and `workspace.files.applyPatch` operate inside approved roots and sandboxes only. Patch requests require a message so the diff has an explicit rationale.
 - Sandbox operations are approval-gated.
 - If no explicit roots are configured, the host walks upward from its binary directory to the nearest `.slnx`, `.sln`, or `.git` marker and exposes that checkout as the default `workspace` root. That makes Visual Studio and VS Code launches land on the opened repo instead of the output folder.
 - Default paths live under `%LocalAppData%\MCPServer\workspace\workspace.db` and `%LocalAppData%\MCPServer\workspaces` unless overridden.
@@ -51,31 +52,41 @@ See [docs/WORKSPACE_SANDBOXES.md](docs/WORKSPACE_SANDBOXES.md) for the full mode
 
 ## Architecture at a glance
 
-Solid arrows point from the owning project or boundary to the dependency it uses. The host-side cluster is drawn as a stack so `MCPServer.Domain` stays visible; the host also directly composes `MCPServer.Application`.
+Solid arrows point from the owning project or boundary to the dependency it uses. The host-side cluster is drawn top-to-bottom so `MCPServer.Domain` stays visible; the host also directly composes `MCPServer.Application`.
 
 ```mermaid
-flowchart LR
+flowchart TB
+    classDef client fill:#eef2ff,stroke:#6366f1,color:#1e1b4b,stroke-width:1.5px;
+    classDef host fill:#ecfeff,stroke:#06b6d4,color:#083344,stroke-width:1.5px;
+    classDef workspace fill:#fff7ed,stroke:#f97316,color:#7c2d12,stroke-width:1.5px;
+    classDef inference fill:#f5f3ff,stroke:#a855f7,color:#4c1d95,stroke-width:1.5px;
+    classDef ssh fill:#f0fdf4,stroke:#22c55e,color:#14532d,stroke-width:1.5px;
+    classDef router fill:#f8fafc,stroke:#94a3b8,color:#0f172a,stroke-width:1.5px;
     subgraph ClientSide["Client side"]
-        Console["MCPServer.Client.Console"]
-        ClientLib["MCPServer.Client"]
-        ClientInfra["MCPServer.Client.Infrastructure"]
-        Python["python/"]
-        Native["MCPServer.AgentRouter.PythonBridge.Native"]
+        direction LR
+        Console["MCPServer.Client.Console"]:::client
+        ClientLib["MCPServer.Client"]:::client
+        ClientInfra["MCPServer.Client.Infrastructure"]:::client
+        Python["python/"]:::client
+        Native["MCPServer.AgentRouter.PythonBridge.Native"]:::client
+
+        Console --> ClientLib
+        Console --> ClientInfra
+        ClientInfra --> ClientLib
+        Python --> Native
     end
 
     subgraph HostSide["Host side"]
         direction TB
-        MainHost["MCPServer.Host"]
-        Infra["MCPServer.Infrastructure"]
-        App["MCPServer.Application"]
-        Domain["MCPServer.Domain\n(host-side shared domain)"]
-        Workspace["MCPServer.Workspace"]
-        WorkspaceTools["MCPServer.Tools.Workspace"]
-        InfTools["MCPServer.Tools.Inference"]
+        MainHost["MCPServer.Host"]:::host
+        Infra["MCPServer.Infrastructure"]:::host
+        App["MCPServer.Application"]:::host
+        Domain["MCPServer.Domain\n(host-side shared domain)"]:::host
+        Workspace["MCPServer.Workspace"]:::workspace
+        WorkspaceTools["MCPServer.Tools.Workspace"]:::workspace
+        InfTools["MCPServer.Tools.Inference"]:::inference
 
-        MainHost --> Infra
-        Infra --> App
-        App --> Domain
+        MainHost --> Infra --> App --> Domain
         MainHost -.-> App
         MainHost --> Workspace
         MainHost --> WorkspaceTools
@@ -85,42 +96,40 @@ flowchart LR
     end
 
     subgraph SshBoundary["SSH boundary"]
-        Sidecar["MCPServer.Host.Sidecar"]
-        Ssh["MCPServer.Ssh"]
-        SshTools["MCPServer.Tools.Ssh"]
+        direction TB
+        Sidecar["MCPServer.Host.Sidecar"]:::ssh
+        Ssh["MCPServer.Ssh"]:::ssh
+        SshTools["MCPServer.Tools.Ssh"]:::ssh
 
         Sidecar --> Ssh
         SshTools --> Ssh
     end
 
     subgraph InferenceBoundary["Inference boundary"]
-        InfApp["MCPServer.Inference.Application"]
-        InfInfra["MCPServer.Inference.Infrastructure"]
-        InfAbs["MCPServer.Inference.Abstractions"]
+        direction TB
+        InfApp["MCPServer.Inference.Application"]:::inference
+        InfInfra["MCPServer.Inference.Infrastructure"]:::inference
+        InfAbs["MCPServer.Inference.Abstractions"]:::inference
 
         InfApp --> InfAbs
         InfInfra --> InfAbs
     end
 
     subgraph RouterCore["AgentRouter core"]
-        ARAbs["Abstractions"]
-        ARDom["Domain"]
-        ARApp["Application"]
-        ARInfra["Infrastructure"]
-        ARHost["Hosting"]
+        direction TB
+        ARHost["Hosting"]:::router
+        ARInfra["Infrastructure"]:::router
+        ARApp["Application"]:::router
+        ARDom["Domain"]:::router
+        ARAbs["Abstractions"]:::router
+
+        ARHost --> ARInfra --> ARApp --> ARDom --> ARAbs
     end
 
-    Console --> ClientLib
-    Console --> ClientInfra
-    ClientInfra --> ClientLib
-
-    Python --> Native
     Native --> ARApp
     ARApp --> InfAbs
     MainHost --> InfApp
     MainHost --> InfInfra
-
-    ARHost --> ARInfra --> ARApp --> ARDom --> ARAbs
 ```
 
 ## Build and test
@@ -191,7 +200,7 @@ If you want to build editor integrations instead of just launching the console, 
 
 - [`extensions/visualstudio/MCPServer.VisualStudio.Vsix`](extensions/visualstudio/MCPServer.VisualStudio.Vsix) is the shipping Visual Studio 2026-compatible VSSDK extension. It keeps the shell layer thin and pushes the workspace and launch logic into shared services.
 - In Visual Studio, the extension menu appears under `Extensions > MCPServer`.
-- [`extensions/vscode/mcpserver-ide-tools`](extensions/vscode/mcpserver-ide-tools) is a thin VS Code extension scaffold that opens the same repo-owned debug profiles from the command palette.
+- [`extensions/vscode/mcpserver-ide-tools`](extensions/vscode/mcpserver-ide-tools) is a thin VS Code extension control surface that opens the same repo-owned workflows, shows the active workspace root, exposes a workspace action menu from the status bar and command palette, and provides UI entry points for inference provider model selection, routing, performance tuning, and cloud-provider API keys. Its chat launcher uses the repo-owned C# `MCPServer.ChatLauncher` project so the visible terminal command stays short and the missing-build case is readable instead of dumping a long `dotnet exec` line into the terminal. Its refresh action only redraws MCPServer state; it does not restart the VS Code extension host.
 - Both IDE extensions are control surfaces for the same agent bubble. They should remain thin, explicit, and unable to bypass workspace or policy boundaries.
 
 Use `inference.providers.list` first if you want to confirm which inference backends are enabled before you generate. Pass `{"probe":true}` when you want a live readiness ping instead of config-only listing, or use the console shortcut `--probe --probe-timeout-ms 3000` on `inference.providers.list` if you want the same thing without writing JSON by hand. For `inference.generate`, use `--provider lmstudio` or `--provider ollama` to inject `providerId` without typing it into the JSON payload yourself.

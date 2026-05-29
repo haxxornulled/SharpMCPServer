@@ -109,15 +109,11 @@ public sealed class WorkspaceSandboxCreateRequest
     public string SourceRootName { get; set; } = string.Empty;
 
     public string? SandboxName { get; set; }
-
-    public string ApprovalToken { get; set; } = string.Empty;
 }
 
 public sealed class WorkspaceSandboxDeleteRequest
 {
     public string SandboxName { get; set; } = string.Empty;
-
-    public string ApprovalToken { get; set; } = string.Empty;
 }
 
 public sealed class WorkspaceFileSearchResult
@@ -166,6 +162,8 @@ public sealed class WorkspacePatchRequest
     public string RelativePath { get; set; } = string.Empty;
 
     public string Patch { get; set; } = string.Empty;
+
+    public string Message { get; set; } = string.Empty;
 }
 
 public sealed class WorkspacePatchResult
@@ -183,6 +181,8 @@ public sealed class WorkspacePatchResult
     public int RemovedLines { get; set; }
 
     public long BytesWritten { get; set; }
+
+    public string Message { get; set; } = string.Empty;
 }
 
 public sealed class WorkspacePatchApplicationResult

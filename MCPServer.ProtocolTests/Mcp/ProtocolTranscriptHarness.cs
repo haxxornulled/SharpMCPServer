@@ -31,12 +31,13 @@ internal sealed class ProtocolTranscriptHarness : IDisposable
         _serializer = _sessionScope.Resolve<IJsonRpcResponseSerializer>();
     }
 
-    public static ProtocolTranscriptHarness Create()
+    public static ProtocolTranscriptHarness Create(Action<ContainerBuilder>? configure = null)
     {
         var builder = new ContainerBuilder();
         builder.RegisterGeneric(typeof(NullLogger<>)).As(typeof(ILogger<>)).SingleInstance();
         builder.RegisterModule(new ApplicationModule());
         builder.RegisterModule(new InfrastructureModule());
+        configure?.Invoke(builder);
         return new ProtocolTranscriptHarness(builder.Build());
     }
 

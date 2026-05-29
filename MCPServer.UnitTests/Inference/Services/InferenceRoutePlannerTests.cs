@@ -42,6 +42,128 @@ public sealed class InferenceRoutePlannerTests
     }
 
     [Fact]
+    public void PlanCandidates_TandemValidate_Uses_The_Configured_Tandem_Candidate_Count()
+    {
+        var planner = new InferenceRoutePlanner(new InferenceRoutingOptions
+        {
+            DefaultStrategy = InferenceRoutingStrategy.TandemValidate,
+            TandemCandidateCount = 2
+        });
+
+        var request = new InferenceRequest(
+            [
+                new InferenceMessage(InferenceRole.User, "hello")
+            ],
+            RoutingHint: new InferenceRoutingHint(
+                InferenceRoutingStrategy.TandemValidate,
+                PreferredProviderId: "ollama",
+                FallbackProviderIds: ["anthropic"]));
+
+        var clients = new IInferenceClient[]
+        {
+            new FakeInferenceClient("anthropic", enabled: true),
+            new FakeInferenceClient("ollama", enabled: true),
+            new FakeInferenceClient("lmstudio", enabled: true)
+        };
+
+        var plan = planner.PlanCandidates(clients, request);
+
+        Assert.Equal(2, plan.Count);
+        Assert.Equal("ollama", plan[0].ProviderId);
+        Assert.Equal("anthropic", plan[1].ProviderId);
+    }
+
+    [Fact]
+    public void PlanCandidates_TandemValidate_Excludes_The_Configured_Validator_When_Enough_Primary_Providers_Are_Available()
+    {
+        var planner = new InferenceRoutePlanner(new InferenceRoutingOptions
+        {
+            DefaultStrategy = InferenceRoutingStrategy.TandemValidate,
+            TandemCandidateCount = 2,
+            TandemValidationEnabled = true,
+            TandemValidationProviderId = "anthropic"
+        });
+
+        var request = new InferenceRequest(
+            [
+                new InferenceMessage(InferenceRole.User, "hello")
+            ],
+            RoutingHint: new InferenceRoutingHint(
+                InferenceRoutingStrategy.TandemValidate,
+                PreferredProviderId: "anthropic",
+                FallbackProviderIds: ["lmstudio", "ollama"]));
+
+        var clients = new IInferenceClient[]
+        {
+            new FakeInferenceClient("anthropic", enabled: true),
+            new FakeInferenceClient("lmstudio", enabled: true),
+            new FakeInferenceClient("ollama", enabled: true)
+        };
+
+        var plan = planner.PlanCandidates(clients, request);
+
+        Assert.Equal(2, plan.Count);
+        Assert.Equal("lmstudio", plan[0].ProviderId);
+        Assert.Equal("ollama", plan[1].ProviderId);
+    }
+
+    [Fact]
+    public void PlanCandidates_SecondOpinion_Uses_The_First_Two_Enabled_Providers()
+    {
+        var planner = new InferenceRoutePlanner(new InferenceRoutingOptions
+        {
+            DefaultStrategy = InferenceRoutingStrategy.SecondOpinion
+        });
+
+        var request = new InferenceRequest(
+            [
+                new InferenceMessage(InferenceRole.User, "hello")
+            ],
+            RoutingHint: new InferenceRoutingHint(
+                InferenceRoutingStrategy.SecondOpinion,
+                PreferredProviderId: "ollama",
+                FallbackProviderIds: ["anthropic"]));
+
+        var clients = new IInferenceClient[]
+        {
+            new FakeInferenceClient("anthropic", enabled: true),
+            new FakeInferenceClient("ollama", enabled: true),
+            new FakeInferenceClient("lmstudio", enabled: true)
+        };
+
+        var plan = planner.PlanCandidates(clients, request);
+
+        Assert.Equal(2, plan.Count);
+        Assert.Equal("ollama", plan[0].ProviderId);
+        Assert.Equal("anthropic", plan[1].ProviderId);
+    }
+
+    [Fact]
+    public void PlanCandidates_Uses_Routing_Priority_Before_Provider_Id()
+    {
+        var planner = new InferenceRoutePlanner(new InferenceRoutingOptions
+        {
+            DefaultStrategy = InferenceRoutingStrategy.PrimaryThenFallback
+        });
+
+        var request = new InferenceRequest(
+            [
+                new InferenceMessage(InferenceRole.User, "hello")
+            ]);
+
+        var clients = new IInferenceClient[]
+        {
+            new FakeInferenceClient("anthropic", enabled: true, routingPriority: 30),
+            new FakeInferenceClient("ollama", enabled: true, routingPriority: 10),
+            new FakeInferenceClient("lmstudio", enabled: true, routingPriority: 20)
+        };
+
+        var plan = planner.PlanCandidates(clients, request);
+
+        Assert.Equal(["ollama", "lmstudio", "anthropic"], plan.Select(client => client.ProviderId));
+    }
+
+    [Fact]
     public async Task GenerateAsync_Falls_Back_To_The_Second_Provider_When_The_First_Fails()
     {
         var options = new InferenceRoutingOptions
@@ -89,11 +211,12 @@ public sealed class InferenceRoutePlannerTests
         public FakeInferenceClient(
             string providerId,
             bool enabled,
+            int routingPriority = 0,
             Func<InferenceRequest, InferenceResponse>? resultFactory = null,
             string? failMessage = null)
         {
             ProviderId = providerId;
-            Descriptor = new InferenceProviderDescriptor(providerId, providerId.ToUpperInvariant(), enabled, SupportsStreaming: false);
+            Descriptor = new InferenceProviderDescriptor(providerId, providerId.ToUpperInvariant(), enabled, false, routingPriority);
             _handler = resultFactory is not null
                 ? request => ValueTask.FromResult(Fin.Succ(resultFactory(request)))
                 : _ => ValueTask.FromResult(Fin.Fail<InferenceResponse>(Error.New(failMessage ?? $"{providerId} failed")));

@@ -23,8 +23,12 @@ sequenceDiagram
     autonumber
     participant Tool as Server tool or task handler
     participant Facade as IMcpClientFeatureInvoker
-    participant Stdio as StdioMcpClientFeatureTransport
-    participant Http as StreamableHttpMcpSessionTransport
+    box rgba(56,189,248,0.08) stdio transport
+        participant Stdio as StdioMcpClientFeatureTransport
+    end
+    box rgba(168,85,247,0.08) Streamable HTTP transport
+        participant Http as StreamableHttpMcpSessionTransport
+    end
     participant Client as Connected MCP client
 
     Tool->>Facade: CreateMessageAsync / ElicitFormAsync / ElicitUrlAsync

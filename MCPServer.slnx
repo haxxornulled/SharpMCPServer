@@ -23,6 +23,7 @@
   <Project Path="MCPServer.Workspace/MCPServer.Workspace.csproj" />
   <Project Path="MCPServer.Client/MCPServer.Client.csproj" />
   <Project Path="MCPServer.Client.Console/MCPServer.Client.Console.csproj" />
+  <Project Path="MCPServer.ChatLauncher/MCPServer.ChatLauncher.csproj" />
   <Project Path="MCPServer.Host.Sidecar/MCPServer.Host.Sidecar.csproj" />
   <Project Path="extensions/visualstudio/MCPServer.VisualStudio.Core/MCPServer.VisualStudio.Core.csproj" />
   <Project Path="extensions/visualstudio/MCPServer.VisualStudio.Vsix/MCPServer.VisualStudio.Vsix.csproj" />

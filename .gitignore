@@ -32,6 +32,7 @@ TestResults/
 *.nupkg
 packages/
 .nuget/
+.nuget-http-cache/
 
 # Node / VS Code extension development
 extensions/vscode/**/node_modules/

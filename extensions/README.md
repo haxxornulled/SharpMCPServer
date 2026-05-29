@@ -55,7 +55,8 @@ Installer notes:
 
 ## VS Code
 
-- `extensions/vscode/mcpserver-ide-tools` is a lightweight VS Code extension scaffold that starts the same repo-owned debug profiles from the command palette.
+- `extensions/vscode/mcpserver-ide-tools` is a lightweight VS Code extension scaffold that starts the same repo-owned workflows from the command palette.
+- The VS Code extension also shows the active workspace root in the status bar, opens a visible `MCPServer` sidebar, and exposes a workspace action menu. It now includes entry points for inference provider model selection, routing, performance tuning, and cloud-provider API keys while still staying thin and host-owned. Its chat launcher uses the repo-owned C# `MCPServer.ChatLauncher` project so the visible terminal command stays short and the missing-build case is readable instead of dumping a long `dotnet exec` line into the terminal. Its refresh action is local-only and does not restart the VS Code extension host.
 - The root [`.vscode/launch.json`](../.vscode/launch.json) and [`.vscode/tasks.json`](../.vscode/tasks.json) files wire that extension into the workspace.
 
 The intended workflow is still project-driven:

@@ -12,6 +12,14 @@ public sealed class InferenceRoutingOptions
 
     public int MaxFanOutCandidates { get; set; } = 4;
 
+    public int TandemCandidateCount { get; set; } = 2;
+
+    public bool TandemValidationEnabled { get; set; }
+
+    public string TandemValidationProviderId { get; set; } = string.Empty;
+
+    public string TandemValidationModel { get; set; } = string.Empty;
+
     public void Validate()
     {
         if (MaxConcurrentRequestsPerProvider <= 0)
@@ -22,6 +30,16 @@ public sealed class InferenceRoutingOptions
         if (MaxFanOutCandidates <= 0)
         {
             throw new InvalidOperationException("InferenceRouting:MaxFanOutCandidates must be greater than zero.");
+        }
+
+        if (TandemCandidateCount < 2)
+        {
+            throw new InvalidOperationException("InferenceRouting:TandemCandidateCount must be at least two.");
+        }
+
+        if (TandemValidationEnabled && string.IsNullOrWhiteSpace(TandemValidationProviderId))
+        {
+            throw new InvalidOperationException("InferenceRouting:TandemValidationProviderId must be configured when tandem validation is enabled.");
         }
     }
 }

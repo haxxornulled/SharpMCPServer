@@ -10,23 +10,38 @@ only need .NET validation, stop after step 1.
 
 ```mermaid
 flowchart LR
-    subgraph DotNet[".NET validation"]
-        Validate["1. Restore, build, and test"]
+    classDef dotnet fill:#eef2ff,stroke:#3b82f6,color:#1e3a8a,stroke-width:1.5px;
+    classDef native fill:#f5f3ff,stroke:#a855f7,color:#4c1d95,stroke-width:1.5px;
+    classDef python fill:#ecfdf5,stroke:#22c55e,color:#14532d,stroke-width:1.5px;
+    classDef done fill:#fff7ed,stroke:#f97316,color:#7c2d12,stroke-width:1.5px;
+
+    subgraph DotNet["1. .NET validation"]
+        direction TB
+        Validate["Restore, build, and test"]:::dotnet
     end
 
-    subgraph Native["NativeAOT bridge"]
-        Publish["2. Publish NativeAOT bridge"]
-        Sync["Sync native payload into `python/src/.../native/`"]
-        Package["Create wheel in `python/dist/`"]
+    subgraph Native["2. NativeAOT bridge"]
+        direction TB
+        Publish["Publish NativeAOT bridge"]:::native
+        Sync["Sync native payload into `python/src/.../native/`"]:::native
+        Package["Create wheel in `python/dist/`"]:::native
+
+        Publish --> Sync --> Package
     end
 
-    subgraph Python["Python packaging"]
-        Install["3. Install wheel into Python"]
-        Smoke["4. Smoke test from a clean temp directory"]
+    subgraph Python["3. Python packaging"]
+        direction TB
+        Install["Install wheel into Python"]:::python
+        Smoke["Smoke test from a clean temp directory"]:::python
+
+        Install --> Smoke
     end
 
-    Validate --> Publish --> Sync --> Package --> Install
-    Install --> Smoke --> Done["Release complete"]
+    Done["4. Release complete"]:::done
+
+    Validate --> Publish
+    Package --> Install
+    Smoke --> Done
 ```
 
 ## Expected environment

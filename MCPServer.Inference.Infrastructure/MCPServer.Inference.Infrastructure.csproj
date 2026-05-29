@@ -9,6 +9,7 @@
     <PackageReference Include="Autofac" />
     <PackageReference Include="LanguageExt.Core" />
     <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 

@@ -1,0 +1,76 @@
+name: Smoke
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-smoke:
+    runs-on: windows-latest
+    env:
+      PYTHONUNBUFFERED: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore .\MCPServer.slnx
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build .\MCPServer.slnx -c Debug --no-restore
+
+      - name: Test smoke suites
+        shell: pwsh
+        run: >
+          dotnet test .\MCPServer.UnitTests\MCPServer.UnitTests.csproj -c Debug --no-build
+          --filter "FullyQualifiedName~McpClientConsoleSmokeTests|FullyQualifiedName~StreamableHttpMcpServerServiceTests"
+
+  python-smoke:
+    runs-on: windows-latest
+    env:
+      PYTHONUNBUFFERED: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Sync Python bridge
+        shell: pwsh
+        timeout-minutes: 30
+        run: .\scripts\Sync-PythonBridge.ps1 -Configuration Release -RuntimeIdentifier win-x64 -BuildWheel
+
+      - name: Install Python wheel
+        shell: pwsh
+        timeout-minutes: 10
+        run: .\scripts\Install-PythonWheel.ps1
+
+      - name: Python wheel smoke test
+        shell: pwsh
+        timeout-minutes: 10
+        run: .\scripts\Smoke-PythonWheel.ps1 -TimeoutSeconds 300
+
+      - name: Python tests
+        shell: pwsh
+        timeout-minutes: 20
+        run: python -m unittest discover -s python\tests -v
