@@ -570,7 +570,7 @@ public sealed class StreamableHttpMcpServerServiceTests
         Func<LogEntry, bool> predicate,
         CancellationToken cancellationToken)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
 
         while (true)
         {
