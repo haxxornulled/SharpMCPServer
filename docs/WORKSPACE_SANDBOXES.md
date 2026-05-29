@@ -54,21 +54,40 @@ That shared registry is part of the bubble boundary, not a convenience cache.
 ## Example flow
 
 ```mermaid
-flowchart LR
-    Stdio["stdio transport"]
-    Http["Streamable HTTP transport"]
-    Host["MCPServer.Host"]
-    Workspace["MCPServer.Workspace"]
-    Tools["MCPServer.Tools.Workspace"]
-    Registry["SqliteWorkspaceSandboxRegistry"]
-    Db["workspace.db"]
+flowchart TB
+    classDef transport fill:#eef2ff,stroke:#3b82f6,color:#1e3a8a,stroke-width:1.5px;
+    classDef host fill:#ecfeff,stroke:#06b6d4,color:#083344,stroke-width:1.5px;
+    classDef workspace fill:#fff7ed,stroke:#f97316,color:#7c2d12,stroke-width:1.5px;
+    classDef storage fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-width:1.5px;
+
+    subgraph Transports["Client transports"]
+        direction LR
+        Stdio["stdio transport"]:::transport
+        Http["Streamable HTTP transport"]:::transport
+    end
+
+    subgraph Server["Shared host path"]
+        direction TB
+        Host["MCPServer.Host"]:::host
+        Tools["MCPServer.Tools.Workspace"]:::workspace
+        Workspace["MCPServer.Workspace"]:::workspace
+
+        Host --> Tools
+        Host --> Workspace
+        Tools --> Workspace
+    end
+
+    subgraph Persistence["Shared SQLite registry"]
+        direction TB
+        Registry["SqliteWorkspaceSandboxRegistry"]:::storage
+        Db["workspace.db"]:::storage
+
+        Registry --> Db
+    end
 
     Stdio --> Host
     Http --> Host
-    Host --> Tools
-    Host --> Workspace
-    Tools --> Workspace
-    Workspace --> Registry --> Db
+    Workspace --> Registry
 ```
 
 The same registry and the same tool logic are used regardless of transport.

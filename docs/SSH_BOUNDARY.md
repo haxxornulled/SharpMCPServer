@@ -27,29 +27,44 @@
 Solid arrows point from the owning boundary to the component it depends on.
 
 ```mermaid
-flowchart LR
-    SidecarCLI["MCPServer.Host.Sidecar"]
-    Factory["SshHostSidecarRuntimeFactory"]
-    RuntimeModule["SshHostSidecarRuntimeModule"]
-    ProviderModule["SshProviderModule"]
-    Tools["MCPServer.Tools.Ssh"]
-    Settings["SshToolSettings"]
-    PathResolver["ISshPathResolver"]
-    ProfileStore["ISshProfileManagementStore"]
-    Vault["ISshCredentialVault"]
-    SqliteProfiles[(SQLite profile DB)]
-    SqliteVault[(SQLite credential vault)]
-    SshNet["SSH.NET execution"]
+flowchart TB
+    classDef shell fill:#eef2ff,stroke:#6366f1,color:#1e1b4b,stroke-width:1.5px;
+    classDef runtime fill:#ecfdf5,stroke:#22c55e,color:#14532d,stroke-width:1.5px;
+    classDef storage fill:#fff7ed,stroke:#f97316,color:#7c2d12,stroke-width:1.5px;
 
-    SidecarCLI --> Factory
-    Factory --> Settings
-    Factory --> RuntimeModule
-    RuntimeModule --> ProviderModule
+    subgraph Shell["Composition shell"]
+        direction TB
+        SidecarCLI["MCPServer.Host.Sidecar"]:::shell
+        Factory["SshHostSidecarRuntimeFactory"]:::shell
+        RuntimeModule["SshHostSidecarRuntimeModule"]:::shell
+        ProviderModule["SshProviderModule"]:::shell
+
+        SidecarCLI --> Factory
+        Factory --> Settings["SshToolSettings"]:::shell
+        Factory --> RuntimeModule
+        RuntimeModule --> ProviderModule
+    end
+
+    subgraph Runtime["SSH runtime"]
+        direction LR
+        Tools["MCPServer.Tools.Ssh"]:::runtime
+        PathResolver["ISshPathResolver"]:::runtime
+        ProfileStore["ISshProfileManagementStore"]:::runtime
+        Vault["ISshCredentialVault"]:::runtime
+        SshNet["SSH.NET execution"]:::runtime
+    end
+
+    subgraph Storage["SQLite-backed stores"]
+        direction LR
+        SqliteProfiles[(SQLite profile DB)]:::storage
+        SqliteVault[(SQLite credential vault)]:::storage
+    end
+
+    Tools --> ProviderModule
     ProviderModule --> PathResolver
     ProviderModule --> ProfileStore
     ProviderModule --> Vault
     ProviderModule --> SshNet
-    Tools --> ProviderModule
     ProfileStore --> SqliteProfiles
     Vault --> SqliteVault
 ```

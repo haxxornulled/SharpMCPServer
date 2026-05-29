@@ -52,31 +52,41 @@ See [docs/WORKSPACE_SANDBOXES.md](docs/WORKSPACE_SANDBOXES.md) for the full mode
 
 ## Architecture at a glance
 
-Solid arrows point from the owning project or boundary to the dependency it uses. The host-side cluster is drawn as a stack so `MCPServer.Domain` stays visible; the host also directly composes `MCPServer.Application`.
+Solid arrows point from the owning project or boundary to the dependency it uses. The host-side cluster is drawn top-to-bottom so `MCPServer.Domain` stays visible; the host also directly composes `MCPServer.Application`.
 
 ```mermaid
-flowchart LR
+flowchart TB
+    classDef client fill:#eef2ff,stroke:#6366f1,color:#1e1b4b,stroke-width:1.5px;
+    classDef host fill:#ecfeff,stroke:#06b6d4,color:#083344,stroke-width:1.5px;
+    classDef workspace fill:#fff7ed,stroke:#f97316,color:#7c2d12,stroke-width:1.5px;
+    classDef inference fill:#f5f3ff,stroke:#a855f7,color:#4c1d95,stroke-width:1.5px;
+    classDef ssh fill:#f0fdf4,stroke:#22c55e,color:#14532d,stroke-width:1.5px;
+    classDef router fill:#f8fafc,stroke:#94a3b8,color:#0f172a,stroke-width:1.5px;
     subgraph ClientSide["Client side"]
-        Console["MCPServer.Client.Console"]
-        ClientLib["MCPServer.Client"]
-        ClientInfra["MCPServer.Client.Infrastructure"]
-        Python["python/"]
-        Native["MCPServer.AgentRouter.PythonBridge.Native"]
+        direction LR
+        Console["MCPServer.Client.Console"]:::client
+        ClientLib["MCPServer.Client"]:::client
+        ClientInfra["MCPServer.Client.Infrastructure"]:::client
+        Python["python/"]:::client
+        Native["MCPServer.AgentRouter.PythonBridge.Native"]:::client
+
+        Console --> ClientLib
+        Console --> ClientInfra
+        ClientInfra --> ClientLib
+        Python --> Native
     end
 
     subgraph HostSide["Host side"]
         direction TB
-        MainHost["MCPServer.Host"]
-        Infra["MCPServer.Infrastructure"]
-        App["MCPServer.Application"]
-        Domain["MCPServer.Domain\n(host-side shared domain)"]
-        Workspace["MCPServer.Workspace"]
-        WorkspaceTools["MCPServer.Tools.Workspace"]
-        InfTools["MCPServer.Tools.Inference"]
+        MainHost["MCPServer.Host"]:::host
+        Infra["MCPServer.Infrastructure"]:::host
+        App["MCPServer.Application"]:::host
+        Domain["MCPServer.Domain\n(host-side shared domain)"]:::host
+        Workspace["MCPServer.Workspace"]:::workspace
+        WorkspaceTools["MCPServer.Tools.Workspace"]:::workspace
+        InfTools["MCPServer.Tools.Inference"]:::inference
 
-        MainHost --> Infra
-        Infra --> App
-        App --> Domain
+        MainHost --> Infra --> App --> Domain
         MainHost -.-> App
         MainHost --> Workspace
         MainHost --> WorkspaceTools
@@ -86,42 +96,40 @@ flowchart LR
     end
 
     subgraph SshBoundary["SSH boundary"]
-        Sidecar["MCPServer.Host.Sidecar"]
-        Ssh["MCPServer.Ssh"]
-        SshTools["MCPServer.Tools.Ssh"]
+        direction TB
+        Sidecar["MCPServer.Host.Sidecar"]:::ssh
+        Ssh["MCPServer.Ssh"]:::ssh
+        SshTools["MCPServer.Tools.Ssh"]:::ssh
 
         Sidecar --> Ssh
         SshTools --> Ssh
     end
 
     subgraph InferenceBoundary["Inference boundary"]
-        InfApp["MCPServer.Inference.Application"]
-        InfInfra["MCPServer.Inference.Infrastructure"]
-        InfAbs["MCPServer.Inference.Abstractions"]
+        direction TB
+        InfApp["MCPServer.Inference.Application"]:::inference
+        InfInfra["MCPServer.Inference.Infrastructure"]:::inference
+        InfAbs["MCPServer.Inference.Abstractions"]:::inference
 
         InfApp --> InfAbs
         InfInfra --> InfAbs
     end
 
     subgraph RouterCore["AgentRouter core"]
-        ARAbs["Abstractions"]
-        ARDom["Domain"]
-        ARApp["Application"]
-        ARInfra["Infrastructure"]
-        ARHost["Hosting"]
+        direction TB
+        ARHost["Hosting"]:::router
+        ARInfra["Infrastructure"]:::router
+        ARApp["Application"]:::router
+        ARDom["Domain"]:::router
+        ARAbs["Abstractions"]:::router
+
+        ARHost --> ARInfra --> ARApp --> ARDom --> ARAbs
     end
 
-    Console --> ClientLib
-    Console --> ClientInfra
-    ClientInfra --> ClientLib
-
-    Python --> Native
     Native --> ARApp
     ARApp --> InfAbs
     MainHost --> InfApp
     MainHost --> InfInfra
-
-    ARHost --> ARInfra --> ARApp --> ARDom --> ARAbs
 ```
 
 ## Build and test

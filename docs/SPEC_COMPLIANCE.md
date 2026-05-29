@@ -33,10 +33,12 @@ Official spec references:
 sequenceDiagram
     autonumber
     participant C as MCP client
-    participant T as Host transport
-    participant M as Session manager
-    participant D as Request dispatcher
-    participant S as Session transport
+    box rgba(56,189,248,0.08) Host transport stack
+        participant T as Host transport
+        participant M as Session manager
+        participant D as Request dispatcher
+        participant S as Session transport
+    end
 
     C->>T: initialize
     T->>M: CreateSession()
