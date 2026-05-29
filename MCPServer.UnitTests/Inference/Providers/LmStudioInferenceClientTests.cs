@@ -39,11 +39,11 @@ public sealed class LmStudioInferenceClientTests
                 [
                     new InferenceMessage(InferenceRole.User, "hello")
                 ]),
-            CancellationToken.None);
+        CancellationToken.None);
 
         Assert.True(result.IsSucc);
         Assert.Equal(1, handler.ChatCompletionsRequests);
-        Assert.Equal(1, handler.RequestBodies.Count);
+        Assert.Single(handler.RequestBodies);
 
         using var document = JsonDocument.Parse(handler.RequestBodies[0]);
         var root = document.RootElement;

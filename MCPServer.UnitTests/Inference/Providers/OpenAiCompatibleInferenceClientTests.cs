@@ -71,13 +71,13 @@ public sealed class OpenAiCompatibleInferenceClientTests
         Assert.Equal(2, handler.ChatCompletionsRequests);
         Assert.Equal(1, handler.ModelsRequests);
         Assert.Equal(["llama3.1", "installed-model"], handler.RequestedModels);
-        Assert.True(handler.RequestedKeepAlives.Contains("5m"));
-        Assert.True(handler.RequestedNumCtx.Contains(8192));
-        Assert.True(handler.RequestedNumPredict.Contains(256));
-        Assert.True(handler.RequestedTopP.Contains(0.9));
-        Assert.True(handler.RequestedTopK.Contains(40));
-        Assert.True(handler.RequestedRepeatPenalty.Contains(1.1));
-        Assert.True(handler.RequestedSeed.Contains(42));
+        Assert.Contains("5m", handler.RequestedKeepAlives);
+        Assert.Contains(8192, handler.RequestedNumCtx);
+        Assert.Contains(256, handler.RequestedNumPredict);
+        Assert.Contains(0.9, handler.RequestedTopP);
+        Assert.Contains(40, handler.RequestedTopK);
+        Assert.Contains(1.1, handler.RequestedRepeatPenalty);
+        Assert.Contains(42, handler.RequestedSeed);
     }
 
     [Fact]
