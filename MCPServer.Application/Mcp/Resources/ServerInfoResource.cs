@@ -1,6 +1,7 @@
 using System.Text.Json;
 using LanguageExt;
 using MCPServer.Application.Mcp.Interfaces;
+using MCPServer.Application.Mcp.Tools;
 using MCPServer.Domain.Mcp;
 
 namespace MCPServer.Application.Mcp.Resources;
@@ -27,7 +28,21 @@ public sealed class ServerInfoResource : IMcpResource
             Name = "MCPServer",
             ProtocolVersion = McpProtocolVersions.Current,
             ImplementationProfile = "stdio-baseline-2025-11-25",
-            Capabilities = ["tools", "resources", "logging", "tasks", "sampling/createMessage", "elicitation/create", "notifications/tasks/status"]
+            Capabilities =
+            [
+                "tools",
+                "resources",
+                "logging",
+                "tasks",
+                "sampling/createMessage",
+                "elicitation/create",
+                "notifications/tasks/status",
+                AgentToolNames.Create,
+                AgentToolNames.SubagentCreate,
+                AgentToolNames.Status,
+                AgentToolNames.Approve,
+                AgentToolNames.Cancel
+            ]
         };
 
         var json = JsonSerializer.Serialize(structured, McpJsonSerializerContext.Default.ServerInfoStructuredContent);

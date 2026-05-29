@@ -2,6 +2,7 @@ using Autofac;
 using MCPServer.Application.Mcp.Interfaces;
 using MCPServer.Tools.Workspace;
 using MCPServer.Workspace.Configuration;
+using System.Text.Json;
 using Xunit;
 
 namespace MCPServer.UnitTests.Workspace;
@@ -43,6 +44,20 @@ public sealed class WorkspaceToolsModuleTests
         Assert.NotNull(container.ResolveKeyed<IMcpTool>(WorkspaceToolNames.FilesWrite));
         Assert.NotNull(container.ResolveKeyed<IMcpTool>(WorkspaceToolNames.FilesApplyPatch));
 
+        var createDescriptor = container.ResolveKeyed<IMcpTool>(WorkspaceToolNames.SandboxesCreate).Descriptor;
+        AssertToolSchemaDoesNotExposeApprovalToken(createDescriptor.InputSchema);
+
+        var deleteDescriptor = container.ResolveKeyed<IMcpTool>(WorkspaceToolNames.SandboxesDelete).Descriptor;
+        AssertToolSchemaDoesNotExposeApprovalToken(deleteDescriptor.InputSchema);
+
         Directory.Delete(rootPath, recursive: true);
+    }
+
+    private static void AssertToolSchemaDoesNotExposeApprovalToken(JsonElement inputSchema)
+    {
+        var properties = inputSchema.GetProperty("properties");
+        Assert.False(properties.TryGetProperty("approvalToken", out _));
+        var required = inputSchema.GetProperty("required").EnumerateArray().Select(element => element.GetString()).ToArray();
+        Assert.DoesNotContain("approvalToken", required);
     }
 }

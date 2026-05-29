@@ -90,7 +90,7 @@ internal sealed class ConsoleOptions
       --open-server-event-stream  Open the MCP SSE stream in HTTP mode.
       --no-open-server-event-stream  Disable the MCP SSE stream in HTTP mode.
       --help                    Show this help.
-      Chat mode supports /help, /exit, /quit, /reset, /clear, /prompt, /tools, /tool, /search, /read, /write, /patch, /edit, /compact, /provider, /model, /system, /strategy, and /fallback inside the prompt.
+      Chat mode supports /help, /exit, /quit, /reset, /clear, /prompt, /tools, /tool, /search, /read, /write, /patch, /edit, /compact, /provider, /model, /system, /strategy, and /fallback inside the prompt. /patch and /edit payloads require a message field.
       Chat mode also seeds a workspace context from the detected checkout root, launch-profile workspace hints, and workspace.roots.list, and /provider or /model reset the transcript while keeping that context.
 
     Examples:

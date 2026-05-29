@@ -1,5 +1,6 @@
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
+using System.Globalization;
 using MCPServer.AgentRouter.Infrastructure.Options;
 using MCPServer.Host.Configuration;
 using MCPServer.Host.Composition;
@@ -59,6 +60,20 @@ try
                     PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2)
                 });
             services.AddHttpClient("anthropic")
+                .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                {
+                    MaxConnectionsPerServer = 32,
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                    PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2)
+                });
+            services.AddHttpClient("openai")
+                .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                {
+                    MaxConnectionsPerServer = 32,
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                    PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2)
+                });
+            services.AddHttpClient("codex")
                 .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
                 {
                     MaxConnectionsPerServer = 32,
@@ -230,6 +245,25 @@ static InferenceRoutingOptions ReadInferenceRoutingOptions(IConfiguration config
         options.MaxFanOutCandidates = maxFanOutCandidates;
     }
 
+    var tandemCandidateCountRaw = section["TandemCandidateCount"];
+    if (int.TryParse(tandemCandidateCountRaw, out var tandemCandidateCount) && tandemCandidateCount > 0)
+    {
+        options.TandemCandidateCount = tandemCandidateCount;
+    }
+
+    var tandemValidationEnabledRaw = section["TandemValidationEnabled"];
+    if (bool.TryParse(tandemValidationEnabledRaw, out var tandemValidationEnabled))
+    {
+        options.TandemValidationEnabled = tandemValidationEnabled;
+    }
+
+    options.TandemValidationProviderId = section["TandemValidationProviderId"] is { Length: > 0 } tandemValidationProviderId
+        ? tandemValidationProviderId.Trim()
+        : string.Empty;
+    options.TandemValidationModel = section["TandemValidationModel"] is { Length: > 0 } tandemValidationModel
+        ? tandemValidationModel.Trim()
+        : string.Empty;
+
     return options;
 }
 
@@ -256,13 +290,44 @@ static McpInferenceOptions ReadInferenceOptions(IConfiguration configuration)
             Model = providerSection["Model"] is { Length: > 0 } model ? model.Trim() : string.Empty,
             HttpClientName = providerSection["HttpClientName"] is { Length: > 0 } httpClientName ? httpClientName.Trim() : string.Empty,
             ApiKey = providerSection["ApiKey"] is { Length: > 0 } apiKey ? apiKey.Trim() : string.Empty,
-            AnthropicVersion = providerSection["AnthropicVersion"] is { Length: > 0 } anthropicVersion ? anthropicVersion.Trim() : "2023-06-01"
+            AnthropicVersion = providerSection["AnthropicVersion"] is { Length: > 0 } anthropicVersion ? anthropicVersion.Trim() : "2023-06-01",
+            RoutingPriority = int.TryParse(providerSection["RoutingPriority"], out var routingPriority) ? routingPriority : 0,
+            MaxTokens = ReadNullableInt32(providerSection, "MaxTokens"),
+            Temperature = ReadNullableDouble(providerSection, "Temperature"),
+            TopP = ReadNullableDouble(providerSection, "TopP"),
+            TopK = ReadNullableInt32(providerSection, "TopK"),
+            RepeatPenalty = ReadNullableDouble(providerSection, "RepeatPenalty"),
+            Seed = ReadNullableInt32(providerSection, "Seed"),
+            ContextLength = ReadNullableInt32(providerSection, "ContextLength"),
+            KeepAlive = providerSection["KeepAlive"] is { Length: > 0 } keepAlive ? keepAlive.Trim() : string.Empty
         };
 
         options.Providers[providerId] = providerOptions;
     }
 
     return options;
+}
+
+static int? ReadNullableInt32(IConfigurationSection section, string key)
+{
+    var rawValue = section[key];
+    if (string.IsNullOrWhiteSpace(rawValue))
+    {
+        return null;
+    }
+
+    return int.TryParse(rawValue, out var value) ? value : null;
+}
+
+static double? ReadNullableDouble(IConfigurationSection section, string key)
+{
+    var rawValue = section[key];
+    if (string.IsNullOrWhiteSpace(rawValue))
+    {
+        return null;
+    }
+
+    return double.TryParse(rawValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : null;
 }
 
 static McpWorkspaceOptions ReadWorkspaceOptions(IConfiguration configuration)

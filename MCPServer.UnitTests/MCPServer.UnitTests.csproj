@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Autofac" />
     <ProjectReference Include="..\MCPServer.Application\MCPServer.Application.csproj" />
     <ProjectReference Include="..\MCPServer.Domain\MCPServer.Domain.csproj" />
@@ -19,6 +20,7 @@
     <ProjectReference Include="..\MCPServer.Client.Infrastructure\MCPServer.Client.Infrastructure.csproj" />
     <ProjectReference Include="..\MCPServer.Client\MCPServer.Client.csproj" />
     <ProjectReference Include="..\MCPServer.Client.Console\MCPServer.Client.Console.csproj" />
+    <ProjectReference Include="..\MCPServer.ChatLauncher\MCPServer.ChatLauncher.csproj" />
     <ProjectReference Include="..\MCPServer.Tools.Workspace\MCPServer.Tools.Workspace.csproj" />
     <ProjectReference Include="..\MCPServer.Workspace\MCPServer.Workspace.csproj" />
   </ItemGroup>

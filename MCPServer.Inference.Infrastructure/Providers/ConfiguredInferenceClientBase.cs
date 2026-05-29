@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using LanguageExt;
 using LanguageExt.Common;
@@ -40,7 +41,7 @@ public abstract class ConfiguredInferenceClientBase : IInferenceClient
         get
         {
             var enabled = TryGetProviderOptions(out var providerOptions) && providerOptions.Enabled;
-            return new InferenceProviderDescriptor(ProviderId, DisplayName, enabled, SupportsStreaming);
+            return new InferenceProviderDescriptor(ProviderId, DisplayName, enabled, SupportsStreaming, providerOptions?.RoutingPriority ?? 0);
         }
     }
 
@@ -145,6 +146,7 @@ public abstract class ConfiguredInferenceClientBase : IInferenceClient
             httpRequest.Content = new StringContent(BuildRequestJson(request, providerOptions), System.Text.Encoding.UTF8, "application/json");
 
             var httpClient = HttpClientFactory.CreateClient(GetHttpClientName(providerOptions));
+            var startedAt = Stopwatch.GetTimestamp();
             using var response = await httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
@@ -153,7 +155,10 @@ public abstract class ConfiguredInferenceClientBase : IInferenceClient
                 return Fin.Fail<InferenceResponse>(Error.New(BuildHttpFailureMessage(response.StatusCode, payload)));
             }
 
-            return ParseResponse(payload, providerOptions);
+            var parseResult = ParseResponse(payload, providerOptions);
+            return parseResult.Match<Fin<InferenceResponse>>(
+                Succ: value => Fin.Succ(AttachPerformanceMetadata(value, Stopwatch.GetElapsedTime(startedAt))),
+                Fail: static error => Fin.Fail<InferenceResponse>(error));
         }
         catch (OperationCanceledException)
         {
@@ -192,7 +197,42 @@ public abstract class ConfiguredInferenceClientBase : IInferenceClient
             throw new InvalidOperationException($"Inference provider base address '{baseAddress}' is not a valid absolute URI.");
         }
 
-        return new Uri(baseUri, relativePath.TrimStart('/'));
+        var normalizedRelativePath = relativePath.TrimStart('/');
+        if (normalizedRelativePath.StartsWith("api/", StringComparison.OrdinalIgnoreCase))
+        {
+            baseUri = RemoveOpenAiVersionSegmentIfPresent(baseUri);
+        }
+
+        return new Uri(baseUri, normalizedRelativePath);
+    }
+
+    private static Uri RemoveOpenAiVersionSegmentIfPresent(Uri baseUri)
+    {
+        var path = baseUri.AbsolutePath;
+        if (path.EndsWith("/v1/", StringComparison.OrdinalIgnoreCase))
+        {
+            path = path[..^4];
+        }
+        else if (path.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            path = path[..^3];
+        }
+        else
+        {
+            return baseUri;
+        }
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            path = "/";
+        }
+
+        var builder = new UriBuilder(baseUri)
+        {
+            Path = path
+        };
+
+        return builder.Uri;
     }
 
     protected static string BuildHttpFailureMessage(HttpStatusCode statusCode, string payload)
@@ -247,6 +287,61 @@ public abstract class ConfiguredInferenceClientBase : IInferenceClient
         var outputTokens = ReadOptionalInt32(usageElement, "completion_tokens", "output_tokens");
         var totalTokens = ReadOptionalInt32(usageElement, "total_tokens");
         return Fin.Succ(new InferenceUsage(inputTokens, outputTokens, totalTokens));
+    }
+
+    protected static InferenceResponse AttachPerformanceMetadata(
+        InferenceResponse response,
+        TimeSpan elapsed)
+    {
+        var elapsedMilliseconds = Math.Max(1L, (long)Math.Ceiling(elapsed.TotalMilliseconds));
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (response.Metadata is { Count: > 0 } existingMetadata)
+        {
+            foreach (var pair in existingMetadata)
+            {
+                metadata[pair.Key] = pair.Value;
+            }
+        }
+
+        metadata["generationElapsedMilliseconds"] = elapsedMilliseconds.ToString(CultureInfo.InvariantCulture);
+
+        if (response.Usage is { } usage)
+        {
+            var totalTokens = usage.TotalTokens ?? GetCombinedTokens(usage.InputTokens, usage.OutputTokens);
+            if (totalTokens is int totalTokenCount)
+            {
+                metadata["tokensPerSecond"] = FormatTokensPerSecond(totalTokenCount, elapsedMilliseconds);
+            }
+
+            if (usage.InputTokens is int inputTokens)
+            {
+                metadata["inputTokensPerSecond"] = FormatTokensPerSecond(inputTokens, elapsedMilliseconds);
+            }
+
+            if (usage.OutputTokens is int outputTokens)
+            {
+                metadata["outputTokensPerSecond"] = FormatTokensPerSecond(outputTokens, elapsedMilliseconds);
+            }
+        }
+
+        return response with { Metadata = metadata };
+    }
+
+    private static int? GetCombinedTokens(int? inputTokens, int? outputTokens)
+    {
+        if (inputTokens is null && outputTokens is null)
+        {
+            return null;
+        }
+
+        return (inputTokens ?? 0) + (outputTokens ?? 0);
+    }
+
+    private static string FormatTokensPerSecond(int tokens, long elapsedMilliseconds)
+    {
+        var elapsedSeconds = Math.Max(elapsedMilliseconds, 1) / 1000d;
+        var tokensPerSecond = tokens / elapsedSeconds;
+        return tokensPerSecond.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
     protected abstract string BuildRequestJson(InferenceRequest request, McpInferenceProviderOptions providerOptions);

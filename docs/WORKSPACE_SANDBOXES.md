@@ -22,7 +22,7 @@ The current tool set is intentionally small:
 - `workspace.files.read`
 - `workspace.files.search`
 - `workspace.files.write`
-- `workspace.files.applyPatch`
+- `workspace.files.applyPatch` requires a message that explains the patch
 
 That is enough for a VS extension or agent workspace to inspect roots, create a disposable sandbox, edit inside it, and tear it down again.
 
@@ -75,7 +75,7 @@ The same registry and the same tool logic are used regardless of transport.
 
 ## Release and run notes
 
-- Configure `McpWorkspace:ApprovalToken` before using sandbox create or delete operations.
+- Configure `McpWorkspace:ApprovalToken` on the host before using sandbox create or delete operations. The sandbox tools consume that host-side token internally and do not require the model or caller to pass it through the tool request.
 - Keep the SQLite database on local storage owned by the host machine.
 - If you move the database path, move it deliberately and keep the workspace roots aligned with the same trust boundary.
 - Use `docs/INSTALL.md` for the .NET-first release flow and `README.md` for the quick-start commands.

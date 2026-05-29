@@ -14,8 +14,6 @@ public sealed class DefaultAgentRunCoordinator : IAgentRunCoordinator
     private const string QueuedMessage = "AgentRouter run queued.";
     private const string CancelledMessage = "AgentRouter run cancelled.";
     private const string ApprovedMessage = "AgentRouter run approved and re-queued.";
-    private const string ApprovalApprovedByKey = "agent.approval.approvedBy";
-
     private static readonly Fin<Unit> UnitSuccess = Fin.Succ(default(Unit));
 
     private readonly IAgentRunStore _runStore;
@@ -330,7 +328,7 @@ public sealed class DefaultAgentRunCoordinator : IAgentRunCoordinator
 
         if (request.ApprovedBy is { } approvedBy && !string.IsNullOrWhiteSpace(approvedBy))
         {
-            metadata[ApprovalApprovedByKey] = approvedBy.Trim();
+            metadata[AgentRouterMetadataKeys.ApprovalApprovedBy] = approvedBy.Trim();
         }
 
         return metadata;

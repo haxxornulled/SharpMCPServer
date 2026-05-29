@@ -31,7 +31,7 @@ public sealed class InferenceRoutePlanner
             return Array.Empty<IInferenceClient>();
         }
 
-        var orderedProviderIds = BuildProviderOrder(enabledClients.Keys, request);
+        var orderedProviderIds = BuildProviderOrder(enabledClients, request);
         var orderedClients = new List<IInferenceClient>(orderedProviderIds.Count);
 
         foreach (var providerId in orderedProviderIds)
@@ -48,6 +48,40 @@ public sealed class InferenceRoutePlanner
             return [orderedClients[0]];
         }
 
+        if (strategy == InferenceRoutingStrategy.SecondOpinion)
+        {
+            return orderedClients.Take(2).ToArray();
+        }
+
+        if (strategy == InferenceRoutingStrategy.TandemValidate)
+        {
+            var tandemClients = orderedClients;
+            if (_options.TandemValidationEnabled && !string.IsNullOrWhiteSpace(_options.TandemValidationProviderId))
+            {
+                var validatorProviderId = _options.TandemValidationProviderId.Trim();
+                var nonValidatorClients = orderedClients
+                    .Where(client => !string.Equals(client.ProviderId, validatorProviderId, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (nonValidatorClients.Count >= _options.TandemCandidateCount)
+                {
+                    tandemClients = nonValidatorClients;
+                }
+                else
+                {
+                    var validatorClient = orderedClients.FirstOrDefault(client => string.Equals(client.ProviderId, validatorProviderId, StringComparison.OrdinalIgnoreCase));
+                    if (validatorClient is not null && nonValidatorClients.All(client => !ReferenceEquals(client, validatorClient)))
+                    {
+                        nonValidatorClients.Add(validatorClient);
+                    }
+
+                    tandemClients = nonValidatorClients;
+                }
+            }
+
+            return tandemClients.Take(_options.TandemCandidateCount).ToArray();
+        }
+
         if (strategy == InferenceRoutingStrategy.FanOutCompare && orderedClients.Count > _options.MaxFanOutCandidates)
         {
             return orderedClients.Take(_options.MaxFanOutCandidates).ToArray();
@@ -57,7 +91,7 @@ public sealed class InferenceRoutePlanner
     }
 
     private IReadOnlyList<string> BuildProviderOrder(
-        IEnumerable<string> providerIds,
+        IReadOnlyDictionary<string, IInferenceClient> enabledClients,
         InferenceRequest request)
     {
         var ordered = new List<string>();
@@ -88,7 +122,10 @@ public sealed class InferenceRoutePlanner
             }
         }
 
-        foreach (var providerId in providerIds.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
+        foreach (var providerId in enabledClients.Values
+                     .OrderBy(static client => client.Descriptor.RoutingPriority)
+                     .ThenBy(static client => client.ProviderId, StringComparer.OrdinalIgnoreCase)
+                     .Select(static client => client.ProviderId))
         {
             Append(providerId);
         }

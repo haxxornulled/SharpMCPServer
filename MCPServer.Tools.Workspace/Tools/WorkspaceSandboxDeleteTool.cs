@@ -2,6 +2,7 @@ using System.Text.Json;
 using LanguageExt;
 using MCPServer.Application.Mcp.Interfaces;
 using MCPServer.Domain.Mcp;
+using MCPServer.Workspace.Configuration;
 using MCPServer.Workspace;
 using MCPServer.Workspace.Interfaces;
 using MCPServer.Workspace.Models;
@@ -14,10 +15,12 @@ public sealed class WorkspaceSandboxDeleteTool : IMcpTool
     private static readonly JsonElement OutputSchema = WorkspaceToolSchemas.CreateSandboxDeleteOutputSchema();
 
     private readonly IWorkspaceSandboxManager _sandboxManager;
+    private readonly McpWorkspaceOptions _options;
 
-    public WorkspaceSandboxDeleteTool(IWorkspaceSandboxManager sandboxManager)
+    public WorkspaceSandboxDeleteTool(IWorkspaceSandboxManager sandboxManager, McpWorkspaceOptions options)
     {
         _sandboxManager = sandboxManager ?? throw new ArgumentNullException(nameof(sandboxManager));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     public McpToolDescriptor Descriptor { get; } = new McpToolDescriptor
@@ -56,14 +59,9 @@ public sealed class WorkspaceSandboxDeleteTool : IMcpTool
             return Fin.Succ<ToolCallResult>(ToolCallResult.Text($"{WorkspaceToolNames.SandboxesDelete} requires a string sandboxName.", isError: true));
         }
 
-        if (WorkspaceToolArguments.RequireString(request.ApprovalToken, "approvalToken", WorkspaceToolNames.SandboxesDelete).IsFail)
-        {
-            return Fin.Succ<ToolCallResult>(ToolCallResult.Text($"{WorkspaceToolNames.SandboxesDelete} requires a string approvalToken.", isError: true));
-        }
-
         var result = await _sandboxManager.DeleteAsync(
             request.SandboxName.Trim(),
-            request.ApprovalToken.Trim(),
+            _options.ApprovalToken,
             cancellationToken).ConfigureAwait(false);
 
         return result.Match<Fin<ToolCallResult>>(

@@ -107,14 +107,35 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         +Console.WriteLine("Hello, workspace!");
         """;
 
-        var result = await _service.ApplyPatchAsync("workspace", "src/Program.cs", patch, CancellationToken.None);
+        var result = await _service.ApplyPatchAsync("workspace", "src/Program.cs", patch, "Fix the hello world output.", CancellationToken.None);
         var applied = TestFin.Success(result);
 
         Assert.Equal(1, applied.AppliedHunks);
         Assert.True(applied.BytesWritten > 0);
+        Assert.Equal("Fix the hello world output.", applied.Message);
 
         var patchedText = await File.ReadAllTextAsync(Path.Combine(_rootPath, "src", "Program.cs"), CancellationToken.None);
         Assert.Contains("Hello, workspace!", patchedText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ApplyPatchAsync_Rejects_Blank_Message()
+    {
+        var patch = """
+        diff --git a/src/Program.cs b/src/Program.cs
+        --- a/src/Program.cs
+        +++ b/src/Program.cs
+        @@ -1,2 +1,2 @@
+        -using System;
+        +using System;
+        -Console.WriteLine("Hello");
+        +Console.WriteLine("Hello, workspace!");
+        """;
+
+        var result = await _service.ApplyPatchAsync("workspace", "src/Program.cs", patch, " ", CancellationToken.None);
+
+        var error = TestFin.Failure(result);
+        Assert.Contains("patch message is required", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

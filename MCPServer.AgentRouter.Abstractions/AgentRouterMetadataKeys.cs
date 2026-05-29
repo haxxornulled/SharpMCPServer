@@ -5,7 +5,10 @@ public static class AgentRouterMetadataKeys
     public const string Capability = "agent.capability";
     public const string WorkflowMode = "agent.workflowMode";
     public const string RouteTarget = "agent.routeTarget";
+    public const string Kind = "agent.kind";
+    public const string ParentRunId = "agent.parentRunId";
     public const string ApprovalGranted = "agent.approval.granted";
     public const string ApprovalId = "agent.approval.id";
+    public const string ApprovalApprovedBy = "agent.approval.approvedBy";
     public const string ApprovalToken = "agent.approval.token";
 }

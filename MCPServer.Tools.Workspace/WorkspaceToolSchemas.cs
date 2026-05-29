@@ -183,11 +183,12 @@ internal static class WorkspaceToolSchemas
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "required": ["rootName", "relativePath", "patch"],
+      "required": ["rootName", "relativePath", "patch", "message"],
       "properties": {
         "rootName": { "type": "string" },
         "relativePath": { "type": "string" },
-        "patch": { "type": "string" }
+        "patch": { "type": "string" },
+        "message": { "type": "string" }
       },
       "additionalProperties": false
     }
@@ -197,7 +198,7 @@ internal static class WorkspaceToolSchemas
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "required": ["rootName", "path", "relativePath", "appliedHunks", "addedLines", "removedLines", "bytesWritten"],
+      "required": ["rootName", "path", "relativePath", "appliedHunks", "addedLines", "removedLines", "bytesWritten", "message"],
       "properties": {
         "rootName": { "type": "string" },
         "path": { "type": "string" },
@@ -205,7 +206,8 @@ internal static class WorkspaceToolSchemas
         "appliedHunks": { "type": "integer" },
         "addedLines": { "type": "integer" },
         "removedLines": { "type": "integer" },
-        "bytesWritten": { "type": "integer" }
+        "bytesWritten": { "type": "integer" },
+        "message": { "type": "string" }
       },
       "additionalProperties": false
     }
@@ -215,11 +217,10 @@ internal static class WorkspaceToolSchemas
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "required": ["sourceRootName", "approvalToken"],
+      "required": ["sourceRootName"],
       "properties": {
         "sourceRootName": { "type": "string" },
-        "sandboxName": { "type": "string" },
-        "approvalToken": { "type": "string" }
+        "sandboxName": { "type": "string" }
       },
       "additionalProperties": false
     }
@@ -254,10 +255,9 @@ internal static class WorkspaceToolSchemas
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "required": ["sandboxName", "approvalToken"],
+      "required": ["sandboxName"],
       "properties": {
-        "sandboxName": { "type": "string" },
-        "approvalToken": { "type": "string" }
+        "sandboxName": { "type": "string" }
       },
       "additionalProperties": false
     }

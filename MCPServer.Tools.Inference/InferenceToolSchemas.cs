@@ -34,7 +34,7 @@ internal static class InferenceToolSchemas
           }
         },
         "providerId": { "type": "string", "minLength": 1 },
-        "strategy": { "type": "string", "enum": ["PrimaryOnly", "PrimaryThenFallback", "FanOutCompare"] },
+        "strategy": { "type": "string", "enum": ["PrimaryOnly", "PrimaryThenFallback", "FanOutCompare", "TandemValidate", "SecondOpinion"] },
         "fallbackProviderIds": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 }

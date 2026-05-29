@@ -12,7 +12,9 @@ public enum InferenceRoutingStrategy
 {
     PrimaryOnly = 0,
     PrimaryThenFallback = 1,
-    FanOutCompare = 2
+    FanOutCompare = 2,
+    TandemValidate = 3,
+    SecondOpinion = 4
 }
 
 public sealed record InferenceMessage(
@@ -50,4 +52,5 @@ public sealed record InferenceProviderDescriptor(
     string ProviderId,
     string DisplayName,
     bool Enabled,
-    bool SupportsStreaming);
+    bool SupportsStreaming,
+    int RoutingPriority = 0);

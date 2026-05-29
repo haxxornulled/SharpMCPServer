@@ -11,6 +11,9 @@
     <PackageReference Include="Autofac" />
     <PackageReference Include="LanguageExt.Core" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Abstractions\MCPServer.AgentRouter.Abstractions.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Application\MCPServer.AgentRouter.Application.csproj" />
+    <ProjectReference Include="..\MCPServer.AgentRouter.Domain\MCPServer.AgentRouter.Domain.csproj" />
     <ProjectReference Include="..\MCPServer.Domain\MCPServer.Domain.csproj" />
   </ItemGroup>
 

@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Net.Sockets;
+using System.Text.RegularExpressions;
 using MCPServer.Domain.Mcp;
 using MCPServer.Infrastructure.Mcp.Http;
 using Xunit;
@@ -139,7 +141,7 @@ public sealed class McpClientConsoleSmokeTests
         Assert.Contains("Tool returned a success result.", consoleResult.Stdout, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [Fact(SkipExceptions = new[] { typeof(LiveInferenceUnavailableException) })]
     public async Task Console_Can_Select_Inference_Provider_With_Shortcut_Over_Stdio()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -174,19 +176,193 @@ public sealed class McpClientConsoleSmokeTests
         Assert.Contains("Calling tool: inference.providers.list", providerSelectionResult.Stdout, StringComparison.Ordinal);
         Assert.Contains("Tool returned a success result.", providerSelectionResult.Stdout, StringComparison.Ordinal);
 
-        var selectedProviderId = TrySelectReadyInferenceProvider(providerSelectionResult.Stdout);
-        if (selectedProviderId is null)
+        var liveTargets = await DiscoverLiveInferenceTargetsAsync(providerSelectionResult.Stdout, hostWorkingDirectory, cancellationToken);
+        if (liveTargets.Count == 0)
         {
-            return;
+            throw new LiveInferenceUnavailableException("No live inference providers with installed models were detected over stdio.");
         }
 
-        // Resolve a real installed model instead of assuming the provider's configured default.
-        // Ollama's default model can be missing locally even when the provider probe reports ready.
-        var selectedModel = await TryResolveInstalledInferenceModelAsync(hostWorkingDirectory, selectedProviderId, cancellationToken);
-        if (selectedModel is null)
+        foreach (var target in liveTargets)
         {
-            return;
+            var consoleResult = await RunProcessAsync(
+                "dotnet",
+                [
+                    consoleDll,
+                    "--transport",
+                    "stdio",
+                    "--server-path",
+                    "dotnet",
+                    "--server-arg",
+                    hostDll,
+                    "--working-directory",
+                    hostWorkingDirectory,
+                    "--tool",
+                    "inference.generate",
+                    "--arguments",
+                    "{\"prompt\":\"Say hello in one sentence.\",\"strategy\":\"PrimaryOnly\"}",
+                    "--provider",
+                    target.ProviderId,
+                    "--model",
+                    target.Model
+                ],
+                consoleWorkingDirectory,
+                cancellationToken);
+
+            Assert.Equal(0, consoleResult.ExitCode);
+            Assert.Contains("Calling tool: inference.generate", consoleResult.Stdout, StringComparison.Ordinal);
+            Assert.Contains("Tool returned a success result.", consoleResult.Stdout, StringComparison.Ordinal);
+            AssertInferenceResponseMetadata(consoleResult.Stdout, target.ProviderId, target.Model);
         }
+    }
+
+    [Fact]
+    public async Task Console_Can_Prompt_To_Start_Inference_When_The_Configured_Provider_Binding_Is_Unreachable_Over_Stdio()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+        var providerPort = GetAvailablePort();
+        var hostDll = GetProjectOutputPath("MCPServer.Host", "MCPServer.Host.dll", configuration);
+        var consoleDll = GetProjectOutputPath("MCPServer.Client.Console", "MCPServer.Client.Console.dll", configuration);
+        var hostWorkingDirectory = Path.GetDirectoryName(hostDll) ?? throw new InvalidOperationException("Host output directory was not found.");
+        var consoleWorkingDirectory = Path.GetDirectoryName(consoleDll) ?? throw new InvalidOperationException("Console output directory was not found.");
+
+        var consoleResult = await RunProcessAsync(
+            "dotnet",
+            [
+                consoleDll,
+                "--transport",
+                "stdio",
+                "--server-path",
+                "dotnet",
+                "--server-arg",
+                hostDll,
+                "--server-arg",
+                "--McpInference:Providers:lmstudio:Enabled=true",
+                "--server-arg",
+                $"--McpInference:Providers:lmstudio:BaseAddress=http://127.0.0.1:{providerPort}/v1/",
+                "--server-arg",
+                "--McpInference:Providers:lmstudio:Model=local-model",
+                "--server-arg",
+                "--McpInference:Providers:lmstudio:HttpClientName=lmstudio",
+                "--working-directory",
+                hostWorkingDirectory,
+                "--tool",
+                "inference.generate",
+                "--arguments",
+                "{\"prompt\":\"Say hello in one sentence.\",\"strategy\":\"PrimaryOnly\"}",
+                "--provider",
+                "lmstudio",
+                "--model",
+                "local-model"
+            ],
+            consoleWorkingDirectory,
+            cancellationToken);
+
+        Assert.Equal(0, consoleResult.ExitCode);
+        Assert.Contains("Calling tool: inference.generate", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Tool returned an error result.", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("All inference providers failed:", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("inference provider 'lmstudio' failed", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Hint: start the configured provider process, then retry.", consoleResult.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Console_Can_Prompt_To_Start_Inference_And_Continue_The_Chat_Loop_When_The_Configured_Provider_Binding_Is_Unreachable_Over_Stdio()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+        var providerPort = GetAvailablePort();
+        var hostDll = GetProjectOutputPath("MCPServer.Host", "MCPServer.Host.dll", configuration);
+        var consoleDll = GetProjectOutputPath("MCPServer.Client.Console", "MCPServer.Client.Console.dll", configuration);
+        var hostWorkingDirectory = Path.GetDirectoryName(hostDll) ?? throw new InvalidOperationException("Host output directory was not found.");
+        var consoleWorkingDirectory = Path.GetDirectoryName(consoleDll) ?? throw new InvalidOperationException("Console output directory was not found.");
+
+        var consoleResult = await RunProcessAsync(
+            "dotnet",
+            [
+                consoleDll,
+                "--transport",
+                "stdio",
+                "--server-path",
+                "dotnet",
+                "--server-arg",
+                hostDll,
+                "--server-arg",
+                "--McpInference:Providers:lmstudio:Enabled=true",
+                "--server-arg",
+                $"--McpInference:Providers:lmstudio:BaseAddress=http://127.0.0.1:{providerPort}/v1/",
+                "--server-arg",
+                "--McpInference:Providers:lmstudio:Model=local-model",
+                "--server-arg",
+                "--McpInference:Providers:lmstudio:HttpClientName=lmstudio",
+                "--working-directory",
+                hostWorkingDirectory,
+                "--chat",
+                "--provider",
+                "lmstudio",
+                "--model",
+                "local-model"
+            ],
+            consoleWorkingDirectory,
+            cancellationToken,
+            [
+                "/strategy PrimaryOnly",
+                "hello",
+                "/exit"
+            ]);
+
+        Assert.Equal(0, consoleResult.ExitCode);
+        Assert.Contains("Chat mode ready.", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Routing strategy set to PrimaryOnly.", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("assistant> [tool returned an error]", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("All inference providers failed:", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Hint: start the configured provider process, then retry.", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Equal(3, CountPromptLines(consoleResult.Stdout));
+    }
+
+    [Fact(SkipExceptions = new[] { typeof(LiveInferenceUnavailableException) })]
+    public async Task Console_Can_Switch_Between_Live_Inference_Providers_Within_Chat_Over_Stdio()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+        var hostDll = GetProjectOutputPath("MCPServer.Host", "MCPServer.Host.dll", configuration);
+        var consoleDll = GetProjectOutputPath("MCPServer.Client.Console", "MCPServer.Client.Console.dll", configuration);
+        var hostWorkingDirectory = Path.GetDirectoryName(hostDll) ?? throw new InvalidOperationException("Host output directory was not found.");
+        var consoleWorkingDirectory = Path.GetDirectoryName(consoleDll) ?? throw new InvalidOperationException("Console output directory was not found.");
+
+        var providerSelectionResult = await RunProcessAsync(
+            "dotnet",
+            [
+                consoleDll,
+                "--transport",
+                "stdio",
+                "--server-path",
+                "dotnet",
+                "--server-arg",
+                hostDll,
+                "--working-directory",
+                hostWorkingDirectory,
+                "--tool",
+                "inference.providers.list",
+                "--probe",
+                "--probe-timeout-ms",
+                "3000"
+            ],
+            consoleWorkingDirectory,
+            cancellationToken);
+
+        Assert.Equal(0, providerSelectionResult.ExitCode);
+        Assert.Contains("Calling tool: inference.providers.list", providerSelectionResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Tool returned a success result.", providerSelectionResult.Stdout, StringComparison.Ordinal);
+
+        var liveTargets = await DiscoverLiveInferenceTargetsAsync(providerSelectionResult.Stdout, hostWorkingDirectory, cancellationToken);
+        if (liveTargets.Count < 2)
+        {
+            throw new LiveInferenceUnavailableException("At least two live inference providers with installed models are required to exercise provider switching over stdio.");
+        }
+
+        var initialTarget = liveTargets[0];
+        var switchedTarget = liveTargets[1];
 
         var consoleResult = await RunProcessAsync(
             "dotnet",
@@ -200,22 +376,289 @@ public sealed class McpClientConsoleSmokeTests
                 hostDll,
                 "--working-directory",
                 hostWorkingDirectory,
-                "--tool",
-                "inference.generate",
-                "--arguments",
-                "{\"prompt\":\"Say hello in one sentence.\"}",
+                "--chat",
                 "--provider",
-                selectedProviderId,
+                initialTarget.ProviderId,
                 "--model",
-                selectedModel
+                initialTarget.Model
             ],
             consoleWorkingDirectory,
-            cancellationToken);
+            cancellationToken,
+            [
+                "/strategy PrimaryOnly",
+                "hello",
+                $"/provider {switchedTarget.ProviderId}",
+                $"/model {switchedTarget.Model}",
+                "hello again",
+                "/exit"
+            ]);
 
         Assert.Equal(0, consoleResult.ExitCode);
-        Assert.Contains("Calling tool: inference.generate", consoleResult.Stdout, StringComparison.Ordinal);
-        Assert.Contains("Tool returned a success result.", consoleResult.Stdout, StringComparison.Ordinal);
-        Assert.Contains($"\"providerId\":\"{selectedProviderId}\"", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Chat mode ready.", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Routing strategy set to PrimaryOnly.", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains("assistant>", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("assistant> [tool returned an error]", consoleResult.Stdout, StringComparison.Ordinal);
+        Assert.Contains($"provider set to {switchedTarget.ProviderId}.", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"model set to {switchedTarget.Model}.", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"provider={initialTarget.ProviderId}", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"provider={switchedTarget.ProviderId}", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"model={initialTarget.Model}", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"model={switchedTarget.Model}", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(6, CountPromptLines(consoleResult.Stdout));
+    }
+
+    [Fact(SkipExceptions = new[] { typeof(LiveInferenceUnavailableException) })]
+    public async Task Console_Can_Select_Inference_Providers_And_Generate_Over_Http()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+        var hostDll = GetProjectOutputPath("MCPServer.Host", "MCPServer.Host.dll", configuration);
+        var consoleDll = GetProjectOutputPath("MCPServer.Client.Console", "MCPServer.Client.Console.dll", configuration);
+        var hostWorkingDirectory = Path.GetDirectoryName(hostDll) ?? throw new InvalidOperationException("Host output directory was not found.");
+        var consoleWorkingDirectory = Path.GetDirectoryName(consoleDll) ?? throw new InvalidOperationException("Console output directory was not found.");
+        var hostPort = GetAvailablePort();
+
+        var liveTargets = await DiscoverLiveProviderTargetsAsync(cancellationToken);
+        if (liveTargets.Count == 0)
+        {
+            throw new LiveInferenceUnavailableException("No live inference providers with installed models were detected for HTTP packet capture.");
+        }
+
+        var liveTargetsByProviderId = liveTargets.ToDictionary(target => target.ProviderId, StringComparer.OrdinalIgnoreCase);
+        var providerProxies = new Dictionary<string, HttpCaptureProxy>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            foreach (var target in liveTargets)
+            {
+                providerProxies[target.ProviderId] = await HttpCaptureProxy.StartAsync(target.UpstreamBaseUri, cancellationToken);
+            }
+
+            var providerProxyBaseUris = providerProxies.ToDictionary(pair => pair.Key, pair => pair.Value.BaseUri, StringComparer.OrdinalIgnoreCase);
+            var hostArguments = new List<string>
+            {
+                hostDll,
+                "--McpTransport:Http:Enabled=true",
+                $"--McpTransport:Http:Port={hostPort}",
+                "--McpTransport:Http:BindLoopbackOnly=true",
+                "--McpTransport:Http:SseHeartbeatMilliseconds=100",
+                "--McpTransport:Http:MaxSessionHistoryMessages=8"
+            };
+            hostArguments.AddRange(CreateLiveHttpInferenceOverrides(liveTargetsByProviderId, providerProxyBaseUris));
+
+            using var hostProcess = StartProcess(
+                "dotnet",
+                hostArguments,
+                hostWorkingDirectory);
+
+            try
+            {
+                await WaitForHttpTransportAsync(hostPort, cancellationToken);
+
+                await using var hostProxy = await HttpCaptureProxy.StartAsync(new Uri($"http://127.0.0.1:{hostPort}/", UriKind.Absolute), cancellationToken);
+                var hostEndpoint = new Uri(hostProxy.BaseUri, "mcp/").AbsoluteUri;
+
+                var providerSelectionResult = await RunProcessAsync(
+                    "dotnet",
+                    [
+                        consoleDll,
+                        "--endpoint",
+                        hostEndpoint,
+                        "--open-server-event-stream",
+                        "--tool",
+                        "inference.providers.list",
+                        "--probe",
+                        "--probe-timeout-ms",
+                        "3000"
+                    ],
+                    consoleWorkingDirectory,
+                    cancellationToken);
+
+                Assert.Equal(0, providerSelectionResult.ExitCode);
+                Assert.Contains("Calling tool: inference.providers.list", providerSelectionResult.Stdout, StringComparison.Ordinal);
+                Assert.Contains("Tool returned a success result.", providerSelectionResult.Stdout, StringComparison.Ordinal);
+
+                var readyProviders = TrySelectReadyInferenceProviders(providerSelectionResult.Stdout);
+                Assert.Equal(liveTargets.Count, readyProviders.Count);
+                foreach (var target in liveTargets)
+                {
+                    Assert.Contains(target.ProviderId, readyProviders, StringComparer.OrdinalIgnoreCase);
+                    AssertProviderProbeResult(
+                        providerSelectionResult.Stdout,
+                        target.ProviderId,
+                        "ready",
+                        new Uri(providerProxyBaseUris[target.ProviderId], "v1/models").AbsoluteUri,
+                        200);
+
+                    var providerProbeExchange = Assert.Single(
+                        providerProxies[target.ProviderId].Exchanges,
+                        exchange =>
+                            string.Equals(exchange.Method, HttpMethod.Get.Method, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(exchange.PathAndQuery, "/v1/models", StringComparison.Ordinal));
+
+                    AssertProviderProbeExchange(providerProbeExchange, target.Model);
+                }
+
+                AssertHostProviderListExchange(hostProxy.Exchanges, readyProviders);
+
+                foreach (var target in liveTargets)
+                {
+                    var hostExchangeStart = hostProxy.Exchanges.Count;
+                    var providerExchangeStart = providerProxies[target.ProviderId].Exchanges.Count;
+
+                    var consoleResult = await RunProcessAsync(
+                        "dotnet",
+                        [
+                            consoleDll,
+                            "--endpoint",
+                            hostEndpoint,
+                            "--open-server-event-stream",
+                            "--tool",
+                            "inference.generate",
+                            "--arguments",
+                            "{\"prompt\":\"Say hello in one sentence.\",\"strategy\":\"PrimaryOnly\"}",
+                            "--provider",
+                            target.ProviderId,
+                            "--model",
+                            target.Model
+                        ],
+                        consoleWorkingDirectory,
+                        cancellationToken);
+
+                    AssertSuccessfulProcessResult(consoleResult);
+                    Assert.Contains("Connected to", consoleResult.Stdout, StringComparison.Ordinal);
+                    Assert.Contains("Calling tool: inference.generate", consoleResult.Stdout, StringComparison.Ordinal);
+                    Assert.Contains("Tool returned a success result.", consoleResult.Stdout, StringComparison.Ordinal);
+                    AssertInferenceResponseMetadata(consoleResult.Stdout, target.ProviderId, target.Model);
+
+                    var hostExchanges = hostProxy.Exchanges.Skip(hostExchangeStart).ToArray();
+                    AssertHostGenerateExchange(hostExchanges, target.ProviderId, target.Model);
+
+                    var providerExchanges = providerProxies[target.ProviderId].Exchanges.Skip(providerExchangeStart).ToArray();
+                    AssertProviderGenerateExchange(providerExchanges, target.ProviderId, target.Model);
+                }
+            }
+            finally
+            {
+                await TryKillProcessAsync(hostProcess, cancellationToken);
+            }
+        }
+        finally
+        {
+            foreach (var proxy in providerProxies.Values)
+            {
+                await proxy.DisposeAsync();
+            }
+        }
+    }
+
+    [Fact(SkipExceptions = new[] { typeof(LiveInferenceUnavailableException) })]
+    public async Task Console_Can_Switch_Between_Live_Inference_Providers_Within_Chat_Over_Http()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+        var hostDll = GetProjectOutputPath("MCPServer.Host", "MCPServer.Host.dll", configuration);
+        var consoleDll = GetProjectOutputPath("MCPServer.Client.Console", "MCPServer.Client.Console.dll", configuration);
+        var hostWorkingDirectory = Path.GetDirectoryName(hostDll) ?? throw new InvalidOperationException("Host output directory was not found.");
+        var consoleWorkingDirectory = Path.GetDirectoryName(consoleDll) ?? throw new InvalidOperationException("Console output directory was not found.");
+        var hostPort = GetAvailablePort();
+
+        var liveTargets = await DiscoverLiveProviderTargetsAsync(cancellationToken);
+        if (liveTargets.Count < 2)
+        {
+            throw new LiveInferenceUnavailableException("At least two live inference providers with installed models are required to exercise provider switching over HTTP packet capture.");
+        }
+
+        var liveTargetsByProviderId = liveTargets.ToDictionary(target => target.ProviderId, StringComparer.OrdinalIgnoreCase);
+        var providerProxies = new Dictionary<string, HttpCaptureProxy>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            foreach (var target in liveTargets)
+            {
+                providerProxies[target.ProviderId] = await HttpCaptureProxy.StartAsync(target.UpstreamBaseUri, cancellationToken);
+            }
+
+            var providerProxyBaseUris = providerProxies.ToDictionary(pair => pair.Key, pair => pair.Value.BaseUri, StringComparer.OrdinalIgnoreCase);
+            var hostArguments = new List<string>
+            {
+                hostDll,
+                "--McpTransport:Http:Enabled=true",
+                $"--McpTransport:Http:Port={hostPort}",
+                "--McpTransport:Http:BindLoopbackOnly=true",
+                "--McpTransport:Http:SseHeartbeatMilliseconds=100",
+                "--McpTransport:Http:MaxSessionHistoryMessages=8"
+            };
+            hostArguments.AddRange(CreateLiveHttpInferenceOverrides(liveTargetsByProviderId, providerProxyBaseUris));
+
+            using var hostProcess = StartProcess(
+                "dotnet",
+                hostArguments,
+                hostWorkingDirectory);
+
+            try
+            {
+                await WaitForHttpTransportAsync(hostPort, cancellationToken);
+
+                await using var hostProxy = await HttpCaptureProxy.StartAsync(new Uri($"http://127.0.0.1:{hostPort}/", UriKind.Absolute), cancellationToken);
+                var hostEndpoint = new Uri(hostProxy.BaseUri, "mcp/").AbsoluteUri;
+
+                var initialTarget = liveTargets[0];
+                var switchedTarget = liveTargets[1];
+
+                var consoleResult = await RunProcessAsync(
+                    "dotnet",
+                    [
+                        consoleDll,
+                        "--endpoint",
+                        hostEndpoint,
+                        "--open-server-event-stream",
+                        "--chat",
+                        "--provider",
+                        initialTarget.ProviderId,
+                        "--model",
+                        initialTarget.Model
+                    ],
+                    consoleWorkingDirectory,
+                    cancellationToken,
+                    [
+                        "/strategy PrimaryOnly",
+                        "hello",
+                        $"/provider {switchedTarget.ProviderId}",
+                        $"/model {switchedTarget.Model}",
+                        "hello again",
+                        "/exit"
+                    ]);
+
+                Assert.Equal(0, consoleResult.ExitCode);
+                Assert.Contains("Chat mode ready.", consoleResult.Stdout, StringComparison.Ordinal);
+                Assert.Contains("Routing strategy set to PrimaryOnly.", consoleResult.Stdout, StringComparison.Ordinal);
+                Assert.Contains("assistant>", consoleResult.Stdout, StringComparison.Ordinal);
+                Assert.DoesNotContain("assistant> [tool returned an error]", consoleResult.Stdout, StringComparison.Ordinal);
+                Assert.Contains($"provider set to {switchedTarget.ProviderId}.", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains($"model set to {switchedTarget.Model}.", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains($"provider={initialTarget.ProviderId}", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains($"provider={switchedTarget.ProviderId}", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains($"model={initialTarget.Model}", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains($"model={switchedTarget.Model}", consoleResult.Stdout, StringComparison.OrdinalIgnoreCase);
+                Assert.Equal(6, CountPromptLines(consoleResult.Stdout));
+
+                AssertHostChatSessionExchanges(hostProxy.Exchanges, initialTarget, switchedTarget);
+                AssertProviderChatExchanges(providerProxies[initialTarget.ProviderId].Exchanges.ToArray(), initialTarget, "hello");
+                AssertProviderChatExchanges(providerProxies[switchedTarget.ProviderId].Exchanges.ToArray(), switchedTarget, "hello again");
+            }
+            finally
+            {
+                await TryKillProcessAsync(hostProcess, cancellationToken);
+            }
+        }
+        finally
+        {
+            foreach (var proxy in providerProxies.Values)
+            {
+                await proxy.DisposeAsync();
+            }
+        }
     }
 
     private static async Task WaitForHttpTransportAsync(int port, CancellationToken cancellationToken)
@@ -297,15 +740,33 @@ public sealed class McpClientConsoleSmokeTests
         }
     }
 
-    private static async Task<ProcessResult> RunProcessAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, CancellationToken cancellationToken)
+    private static async Task<ProcessResult> RunProcessAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? standardInputLines = null)
     {
         using var process = StartProcess(fileName, arguments, workingDirectory);
         try
         {
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+
+            if (standardInputLines is not null)
+            {
+                foreach (var line in standardInputLines)
+                {
+                    await process.StandardInput.WriteLineAsync(line).ConfigureAwait(false);
+                }
+            }
+
+            process.StandardInput.Close();
+
             await process.WaitForExitAsync(cancellationToken);
 
-            var stdout = await process.StandardOutput.ReadToEndAsync();
-            var stderr = await process.StandardError.ReadToEndAsync();
+            var stdout = await stdoutTask.ConfigureAwait(false);
+            var stderr = await stderrTask.ConfigureAwait(false);
 
             return new ProcessResult(process.ExitCode, stdout, stderr);
         }
@@ -313,6 +774,17 @@ public sealed class McpClientConsoleSmokeTests
         {
             await TryKillProcessAsync(process, CancellationToken.None);
         }
+    }
+
+    private static void AssertSuccessfulProcessResult(ProcessResult result)
+    {
+        if (result.ExitCode == 0)
+        {
+            return;
+        }
+
+        Assert.Fail(
+            $"Expected exit code 0 but got {result.ExitCode}.\nSTDOUT:\n{result.Stdout}\nSTDERR:\n{result.Stderr}");
     }
 
     private static Process StartProcess(string fileName, IReadOnlyList<string> arguments, string workingDirectory)
@@ -323,6 +795,7 @@ public sealed class McpClientConsoleSmokeTests
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
@@ -359,6 +832,13 @@ public sealed class McpClientConsoleSmokeTests
         }
     }
 
+    private static int CountPromptLines(string stdout)
+    {
+        return stdout
+            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries)
+            .Count(line => line.StartsWith("> [", StringComparison.Ordinal));
+    }
+
     private static int GetAvailablePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -382,14 +862,21 @@ public sealed class McpClientConsoleSmokeTests
 
     private static string? TrySelectReadyInferenceProvider(string stdout)
     {
+        return TrySelectReadyInferenceProviders(stdout).FirstOrDefault();
+    }
+
+    private static IReadOnlyList<string> TrySelectReadyInferenceProviders(string stdout)
+    {
+        var readyProviders = new List<string>();
+
         if (!TryGetStructuredContent(stdout, out var structuredContent))
         {
-            return null;
+            return readyProviders;
         }
 
         if (!structuredContent.TryGetProperty("providers", out var providers) || providers.ValueKind != JsonValueKind.Array)
         {
-            return null;
+            return readyProviders;
         }
 
         foreach (var provider in providers.EnumerateArray())
@@ -412,11 +899,11 @@ public sealed class McpClientConsoleSmokeTests
             var providerId = providerIdProperty.GetString();
             if (!string.IsNullOrWhiteSpace(providerId))
             {
-                return providerId;
+                readyProviders.Add(providerId);
             }
         }
 
-        return null;
+        return readyProviders;
     }
 
     private static async Task<string?> TryResolveInstalledInferenceModelAsync(string hostWorkingDirectory, string providerId, CancellationToken cancellationToken)
@@ -438,32 +925,600 @@ public sealed class McpClientConsoleSmokeTests
             return null;
         }
 
-        using var httpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(3)
-        };
+        return await TryResolveInstalledInferenceModelAsync(providerBaseUri, cancellationToken).ConfigureAwait(false);
+    }
 
-        using var response = await httpClient.GetAsync(new Uri(providerBaseUri, "models"), cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
+    private static async Task<IReadOnlyList<LiveInferenceTarget>> DiscoverLiveInferenceTargetsAsync(
+        string stdout,
+        string hostWorkingDirectory,
+        CancellationToken cancellationToken)
+    {
+        var liveTargets = new List<LiveInferenceTarget>();
+        foreach (var providerId in TrySelectReadyInferenceProviders(stdout))
         {
-            return null;
-        }
-
-        using var responseDocument = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
-        if (!responseDocument.RootElement.TryGetProperty("data"u8, out var data) || data.ValueKind != JsonValueKind.Array)
-        {
-            return null;
-        }
-
-        foreach (var item in data.EnumerateArray())
-        {
-            if (TryGetString(item, out var modelId, "id"))
+            var model = await TryResolveInstalledInferenceModelAsync(hostWorkingDirectory, providerId, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(model))
             {
-                return modelId;
+                liveTargets.Add(new LiveInferenceTarget(providerId, model));
             }
         }
 
-        return null;
+        return liveTargets;
+    }
+
+    private static async Task<IReadOnlyList<LiveProviderTarget>> DiscoverLiveProviderTargetsAsync(CancellationToken cancellationToken)
+    {
+        var liveTargets = new List<LiveProviderTarget>();
+        foreach (var (providerId, providerBaseUri) in
+            new (string ProviderId, Uri ProviderBaseUri)[]
+            {
+                ("lmstudio", GetLiveLmStudioBaseUri()),
+                ("ollama", GetLiveOllamaBaseUri())
+            })
+        {
+            var model = await TryResolveInstalledInferenceModelAsync(providerBaseUri, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(model))
+            {
+                liveTargets.Add(new LiveProviderTarget(providerId, providerBaseUri, model));
+            }
+        }
+
+        return liveTargets;
+    }
+
+    private static string? SelectPreferredInferenceModelId(IReadOnlyList<string> modelIds)
+    {
+        var candidates = modelIds
+            .Select((modelId, discoveryOrder) => new InferenceModelCandidate(
+                ModelId: modelId,
+                DiscoveryOrder: discoveryOrder,
+                SizeInBillions: TryParseModelSizeInBillions(modelId, out var size) ? size : null))
+            .Where(candidate =>
+                !string.IsNullOrWhiteSpace(candidate.ModelId) &&
+                !candidate.ModelId.Contains("embed", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (candidates.Length == 0)
+        {
+            return null;
+        }
+
+        var scoredCandidates = candidates
+            .Where(candidate => candidate.SizeInBillions.HasValue)
+            .OrderBy(candidate => candidate.SizeInBillions!.Value)
+            .ThenBy(candidate => candidate.ModelId.Length)
+            .ThenBy(candidate => candidate.DiscoveryOrder)
+            .ToArray();
+
+        if (scoredCandidates.Length > 0)
+        {
+            return scoredCandidates[0].ModelId;
+        }
+
+        return candidates
+            .OrderBy(candidate => candidate.DiscoveryOrder)
+            .First()
+            .ModelId;
+    }
+
+    private static bool TryParseModelSizeInBillions(string modelId, out double sizeInBillions)
+    {
+        var match = Regex.Match(
+            modelId,
+            @"(?<!\d)(?<size>\d+(?:\.\d+)?)b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        if (match.Success &&
+            double.TryParse(match.Groups["size"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out sizeInBillions))
+        {
+            return true;
+        }
+
+        sizeInBillions = default;
+        return false;
+    }
+
+    private static Uri GetLiveLmStudioBaseUri()
+    {
+        var configuredBaseAddress = Environment.GetEnvironmentVariable("MCP_LMSTUDIO_BASE_ADDRESS")
+            ?? Environment.GetEnvironmentVariable("LMSTUDIO_BASE_ADDRESS")
+            ?? "http://127.0.0.1:1234/v1/";
+
+        if (!Uri.TryCreate(configuredBaseAddress, UriKind.Absolute, out var baseUri))
+        {
+            throw new InvalidOperationException($"The LM Studio base address '{configuredBaseAddress}' is not a valid absolute URI.");
+        }
+
+        var normalizedBaseAddress = baseUri.AbsoluteUri.EndsWith("/", StringComparison.Ordinal)
+            ? baseUri.AbsoluteUri
+            : baseUri.AbsoluteUri + "/";
+
+        return new Uri(normalizedBaseAddress, UriKind.Absolute);
+    }
+
+    private static Uri GetLiveOllamaBaseUri()
+    {
+        var configuredBaseAddress = Environment.GetEnvironmentVariable("MCP_OLLAMA_BASE_ADDRESS")
+            ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_ADDRESS")
+            ?? "http://127.0.0.1:11434/v1/";
+
+        if (!Uri.TryCreate(configuredBaseAddress, UriKind.Absolute, out var baseUri))
+        {
+            throw new InvalidOperationException($"The Ollama base address '{configuredBaseAddress}' is not a valid absolute URI.");
+        }
+
+        var normalizedBaseAddress = baseUri.AbsoluteUri.EndsWith("/", StringComparison.Ordinal)
+            ? baseUri.AbsoluteUri
+            : baseUri.AbsoluteUri + "/";
+
+        return new Uri(normalizedBaseAddress, UriKind.Absolute);
+    }
+
+    private static IReadOnlyList<string> CreateLiveHttpInferenceOverrides(
+        IReadOnlyDictionary<string, LiveProviderTarget> liveTargetsByProviderId,
+        IReadOnlyDictionary<string, Uri> providerProxyBaseUris)
+    {
+        var arguments = new List<string>();
+        foreach (var providerId in new[] { "lmstudio", "ollama" })
+        {
+            if (!liveTargetsByProviderId.TryGetValue(providerId, out var liveTarget) ||
+                !providerProxyBaseUris.TryGetValue(providerId, out var providerProxyBaseUri))
+            {
+                arguments.Add($"--McpInference:Providers:{providerId}:Enabled=False");
+                continue;
+            }
+
+            arguments.Add($"--McpInference:Providers:{providerId}:Enabled=True");
+            arguments.Add($"--McpInference:Providers:{providerId}:BaseAddress={new Uri(providerProxyBaseUri, "v1/").AbsoluteUri}");
+            arguments.Add($"--McpInference:Providers:{providerId}:Model={liveTarget.Model}");
+            arguments.Add($"--McpInference:Providers:{providerId}:HttpClientName={providerId}");
+        }
+
+        return arguments;
+    }
+
+    private static async Task<string> RequireLiveLmStudioModelAsync(Uri providerBaseUri, CancellationToken cancellationToken)
+    {
+        var model = await TryResolveInstalledInferenceModelAsync(providerBaseUri, cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(model))
+        {
+            return model;
+        }
+
+        throw new LiveLmStudioUnavailableException($"LM Studio at '{providerBaseUri}' did not report any installed models.");
+    }
+
+    private static async Task<string?> TryResolveInstalledInferenceModelAsync(Uri providerBaseUri, CancellationToken cancellationToken)
+    {
+        using var httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(5)
+        };
+
+        try
+        {
+            using var response = await httpClient.GetAsync(new Uri(providerBaseUri, "models"), cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            using var responseDocument = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+            if (!responseDocument.RootElement.TryGetProperty("data"u8, out var data) || data.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var modelIds = new List<string>();
+            foreach (var item in data.EnumerateArray())
+            {
+                if (TryGetString(item, out var modelId, "id") && !string.IsNullOrWhiteSpace(modelId))
+                {
+                    modelIds.Add(modelId);
+                }
+            }
+
+            return SelectPreferredInferenceModelId(modelIds);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<string> CreateLiveLmStudioHostOverrides(Uri providerBaseUri, string model)
+    {
+        return
+        [
+            "--server-arg",
+            "--McpInference:Providers:lmstudio:Enabled=true",
+            "--server-arg",
+            $"--McpInference:Providers:lmstudio:BaseAddress={providerBaseUri.AbsoluteUri}",
+            "--server-arg",
+            $"--McpInference:Providers:lmstudio:Model={model}",
+            "--server-arg",
+            "--McpInference:Providers:lmstudio:HttpClientName=lmstudio"
+        ];
+    }
+
+    private static void AssertProviderProbeExchange(CapturedHttpExchange exchange, string expectedModel)
+    {
+        Assert.Equal(HttpMethod.Get.Method, exchange.Method, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal("/v1/models", exchange.PathAndQuery, StringComparer.Ordinal);
+        Assert.Equal((int)HttpStatusCode.OK, exchange.StatusCode);
+        Assert.False(string.IsNullOrWhiteSpace(exchange.ResponseBody));
+
+        using var responseDocument = JsonDocument.Parse(exchange.ResponseBody);
+        var root = responseDocument.RootElement;
+        Assert.True(root.TryGetProperty("data"u8, out var data) && data.ValueKind == JsonValueKind.Array, "Expected the provider probe response to contain a data array.");
+        Assert.True(data.GetArrayLength() > 0, "Expected the provider probe response to contain at least one model.");
+        Assert.Contains(data.EnumerateArray(), model =>
+            string.Equals(model.GetProperty("id").GetString(), expectedModel, StringComparison.Ordinal));
+    }
+
+    private static void AssertProviderGenerateExchange(CapturedHttpExchange[] exchanges, string providerId, string model)
+    {
+        var exchange = Assert.Single(exchanges, captured =>
+            string.Equals(captured.Method, HttpMethod.Post.Method, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(captured.PathAndQuery, "/v1/chat/completions", StringComparison.Ordinal));
+
+        AssertOpenAiChatCompletionRequest(exchange, providerId, model, "Say hello in one sentence.");
+        AssertOpenAiChatCompletionResponse(exchange, providerId, model);
+    }
+
+    private static void AssertProviderChatExchanges(CapturedHttpExchange[] exchanges, LiveProviderTarget target, string expectedPrompt)
+    {
+        var exchange = Assert.Single(exchanges, captured =>
+            string.Equals(captured.Method, HttpMethod.Post.Method, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(captured.PathAndQuery, "/v1/chat/completions", StringComparison.Ordinal));
+
+        AssertOpenAiChatCompletionRequest(exchange, target.ProviderId, target.Model, expectedPrompt);
+        AssertOpenAiChatCompletionResponse(exchange, target.ProviderId, target.Model);
+    }
+
+    private static void AssertOpenAiChatCompletionRequest(CapturedHttpExchange exchange, string providerId, string model, string expectedPrompt)
+    {
+        Assert.Equal((int)HttpStatusCode.OK, exchange.StatusCode);
+        Assert.False(string.IsNullOrWhiteSpace(exchange.RequestBody));
+
+        using var requestDocument = JsonDocument.Parse(exchange.RequestBody);
+        var root = requestDocument.RootElement;
+        Assert.Equal(model, root.GetProperty("model").GetString());
+        Assert.False(root.GetProperty("stream").GetBoolean());
+
+        var messages = root.GetProperty("messages");
+        Assert.True(messages.ValueKind == JsonValueKind.Array && messages.GetArrayLength() > 0, "Expected at least one chat message.");
+        Assert.Contains(messages.EnumerateArray(), message =>
+            message.TryGetProperty("role", out var role) &&
+            string.Equals(role.GetString(), "user", StringComparison.OrdinalIgnoreCase) &&
+            message.TryGetProperty("content", out var content) &&
+            content.ValueKind == JsonValueKind.String &&
+            (content.GetString() ?? string.Empty).Contains(expectedPrompt, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void AssertOpenAiChatCompletionResponse(CapturedHttpExchange exchange, string providerId, string model)
+    {
+        Assert.Equal((int)HttpStatusCode.OK, exchange.StatusCode);
+        Assert.False(string.IsNullOrWhiteSpace(exchange.ResponseBody));
+
+        using var responseDocument = JsonDocument.Parse(exchange.ResponseBody);
+        var root = responseDocument.RootElement;
+        if (root.TryGetProperty("model"u8, out var responseModel) && responseModel.ValueKind == JsonValueKind.String)
+        {
+            Assert.Equal(model, responseModel.GetString(), StringComparer.Ordinal);
+        }
+
+        Assert.True(root.TryGetProperty("choices"u8, out var choices) && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0, $"Expected provider '{providerId}' to return a non-empty choices array.");
+        var message = choices[0].GetProperty("message");
+        Assert.False(string.IsNullOrWhiteSpace(message.GetProperty("content").GetString()));
+    }
+
+    private static void AssertHostProviderListExchange(IReadOnlyList<CapturedHttpExchange> exchanges, IReadOnlyList<string> readyProviders)
+    {
+        var toolsListExchange = Assert.Single(exchanges, exchange =>
+            string.Equals(exchange.Method, HttpMethod.Post.Method, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(exchange.GetRequestHeader("Mcp-Method"), McpMethods.ToolsList, StringComparison.Ordinal));
+        AssertMcpRequestHeaders(toolsListExchange, expectedMethod: McpMethods.ToolsList, expectedProtocolVersion: McpProtocolVersions.Current);
+        AssertMcpSessionHeader(toolsListExchange);
+
+        var toolCall = FindSingleToolCallExchange(exchanges, "inference.providers.list");
+        AssertMcpRequestHeaders(toolCall, expectedMethod: McpMethods.ToolsCall, expectedProtocolVersion: McpProtocolVersions.Current);
+        AssertMcpSessionHeader(toolCall);
+
+        using var requestDocument = JsonDocument.Parse(toolCall.RequestBody);
+        var requestRoot = requestDocument.RootElement;
+        var parameters = requestRoot.GetProperty("params");
+        Assert.Equal("inference.providers.list", parameters.GetProperty("name").GetString());
+        var arguments = parameters.GetProperty("arguments");
+        Assert.True(arguments.GetProperty("probe").GetBoolean());
+        Assert.Equal(3000, arguments.GetProperty("probeTimeoutMilliseconds").GetInt32());
+
+        using var responseDocument = JsonDocument.Parse(toolCall.ResponseBody);
+        var responseRoot = responseDocument.RootElement;
+        var result = responseRoot.GetProperty("result");
+        Assert.True(result.TryGetProperty("structuredContent"u8, out var structuredContent));
+        Assert.True(structuredContent.TryGetProperty("providers"u8, out var providers) && providers.ValueKind == JsonValueKind.Array, "Expected providers structured content in the inference.providers.list response.");
+        Assert.True(TryGetToolsArray(toolsListExchange.ResponseBody, out var tools), "Expected the tools/list response to contain a tools array.");
+        Assert.Contains(tools.EnumerateArray(), tool =>
+        {
+            var name = tool.GetProperty("name").GetString() ?? string.Empty;
+            return name.Contains("generate", StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.Contains(tools.EnumerateArray(), tool =>
+        {
+            var name = tool.GetProperty("name").GetString() ?? string.Empty;
+            return name.Contains("providers", StringComparison.OrdinalIgnoreCase) &&
+                   name.Contains("list", StringComparison.OrdinalIgnoreCase);
+        });
+
+        foreach (var readyProvider in readyProviders)
+        {
+            Assert.Contains(providers.EnumerateArray(), provider =>
+                string.Equals(provider.GetProperty("providerId").GetString(), readyProvider, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(provider.GetProperty("status").GetString(), "ready", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private static void AssertHostGenerateExchange(IReadOnlyList<CapturedHttpExchange> exchanges, string providerId, string model)
+    {
+        var toolsListExchange = Assert.Single(exchanges, exchange =>
+            string.Equals(exchange.Method, HttpMethod.Post.Method, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(exchange.GetRequestHeader("Mcp-Method"), McpMethods.ToolsList, StringComparison.Ordinal));
+        AssertMcpRequestHeaders(toolsListExchange, expectedMethod: McpMethods.ToolsList, expectedProtocolVersion: McpProtocolVersions.Current);
+        AssertMcpSessionHeader(toolsListExchange);
+        Assert.True(TryGetToolsArray(toolsListExchange.ResponseBody, out var tools), "Expected the tools/list response to contain a tools array.");
+        Assert.Contains(tools.EnumerateArray(), tool =>
+        {
+            var name = tool.GetProperty("name").GetString() ?? string.Empty;
+            return name.Contains("generate", StringComparison.OrdinalIgnoreCase);
+        });
+
+        var toolCall = FindSingleToolCallExchange(exchanges, "inference.generate");
+        AssertMcpRequestHeaders(toolCall, expectedMethod: McpMethods.ToolsCall, expectedProtocolVersion: McpProtocolVersions.Current);
+        AssertMcpSessionHeader(toolCall);
+
+        using var requestDocument = JsonDocument.Parse(toolCall.RequestBody);
+        var requestRoot = requestDocument.RootElement;
+        var parameters = requestRoot.GetProperty("params");
+        Assert.Equal("inference.generate", parameters.GetProperty("name").GetString());
+        var arguments = parameters.GetProperty("arguments");
+        Assert.Equal(providerId, arguments.GetProperty("providerId").GetString(), StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(model, arguments.GetProperty("model").GetString(), StringComparer.Ordinal);
+        Assert.Equal("Say hello in one sentence.", arguments.GetProperty("prompt").GetString(), StringComparer.Ordinal);
+        Assert.Equal("PrimaryOnly", arguments.GetProperty("strategy").GetString(), StringComparer.Ordinal);
+
+        using var responseDocument = JsonDocument.Parse(toolCall.ResponseBody);
+        var responseRoot = responseDocument.RootElement;
+        var result = responseRoot.GetProperty("result");
+        var structuredContent = result.GetProperty("structuredContent");
+        Assert.Equal(providerId, structuredContent.GetProperty("providerId").GetString(), StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(model, structuredContent.GetProperty("model").GetString(), StringComparer.Ordinal);
+        Assert.False(string.IsNullOrWhiteSpace(structuredContent.GetProperty("content").GetString()));
+    }
+
+    private static void AssertHostChatSessionExchanges(IReadOnlyList<CapturedHttpExchange> exchanges, LiveProviderTarget initialTarget, LiveProviderTarget switchedTarget)
+    {
+        var initializeExchange = Assert.Single(exchanges, exchange =>
+            string.Equals(exchange.Method, HttpMethod.Post.Method, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(exchange.GetRequestHeader("Mcp-Method"), McpMethods.Initialize, StringComparison.Ordinal));
+        AssertMcpRequestHeaders(initializeExchange, expectedMethod: McpMethods.Initialize, expectedProtocolVersion: null);
+
+        using var initializeDocument = JsonDocument.Parse(initializeExchange.RequestBody);
+        Assert.Equal(McpMethods.Initialize, initializeDocument.RootElement.GetProperty("method").GetString());
+
+        var initializedExchange = Assert.Single(exchanges, exchange =>
+            string.Equals(exchange.Method, HttpMethod.Post.Method, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(exchange.GetRequestHeader("Mcp-Method"), McpMethods.NotificationsInitialized, StringComparison.Ordinal));
+        AssertMcpRequestHeaders(initializedExchange, expectedMethod: McpMethods.NotificationsInitialized, expectedProtocolVersion: McpProtocolVersions.Current);
+        AssertMcpSessionHeader(initializedExchange);
+
+        var getExchange = Assert.Single(exchanges, exchange => string.Equals(exchange.Method, HttpMethod.Get.Method, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("/mcp/", getExchange.PathAndQuery, StringComparer.Ordinal);
+        Assert.StartsWith("text/event-stream", getExchange.GetResponseHeader("Content-Type") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        AssertMcpSessionHeader(getExchange);
+
+        var toolsListExchange = Assert.Single(exchanges, exchange =>
+            string.Equals(exchange.Method, HttpMethod.Post.Method, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(exchange.GetRequestHeader("Mcp-Method"), McpMethods.ToolsList, StringComparison.Ordinal));
+        AssertMcpRequestHeaders(toolsListExchange, expectedMethod: McpMethods.ToolsList, expectedProtocolVersion: McpProtocolVersions.Current);
+        AssertMcpSessionHeader(toolsListExchange);
+        Assert.True(TryGetToolsArray(toolsListExchange.ResponseBody, out var tools), "Expected the tools/list response to contain a tools array.");
+        Assert.Contains(tools.EnumerateArray(), tool =>
+        {
+            var name = tool.GetProperty("name").GetString() ?? string.Empty;
+            return name.Contains("generate", StringComparison.OrdinalIgnoreCase);
+        });
+
+        var toolCalls = exchanges
+            .Where(exchange =>
+                string.Equals(exchange.Method, HttpMethod.Post.Method, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(exchange.GetRequestHeader("Mcp-Method"), McpMethods.ToolsCall, StringComparison.Ordinal))
+            .Select(exchange => new
+            {
+                Exchange = exchange,
+                Name = GetToolCallName(exchange)
+            })
+            .ToArray();
+        Assert.All(toolCalls, call =>
+        {
+            Assert.True(
+                string.Equals(call.Name, "inference.generate", StringComparison.Ordinal) ||
+                string.Equals(call.Name, "inference.providers.list", StringComparison.Ordinal) ||
+                string.Equals(call.Name, "workspace.roots.list", StringComparison.Ordinal),
+                $"Unexpected tool call '{call.Name}' in chat session.");
+        });
+
+        var generateCalls = toolCalls
+            .Where(call => string.Equals(call.Name, "inference.generate", StringComparison.Ordinal))
+            .Select(call => call.Exchange)
+            .ToArray();
+        Assert.Equal(2, generateCalls.Length);
+        AssertHostGenerateToolCall(generateCalls[0], initialTarget, "hello");
+        AssertHostGenerateToolCall(generateCalls[1], switchedTarget, "hello again");
+
+        var deleteExchange = Assert.Single(exchanges, exchange => string.Equals(exchange.Method, HttpMethod.Delete.Method, StringComparison.OrdinalIgnoreCase));
+        AssertMcpSessionHeader(deleteExchange);
+        Assert.Equal((int)HttpStatusCode.NoContent, deleteExchange.StatusCode);
+    }
+
+    private static void AssertHostGenerateToolCall(CapturedHttpExchange exchange, LiveProviderTarget target, string expectedPrompt)
+    {
+        AssertMcpRequestHeaders(exchange, expectedMethod: McpMethods.ToolsCall, expectedProtocolVersion: McpProtocolVersions.Current);
+        AssertMcpSessionHeader(exchange);
+
+        using var requestDocument = JsonDocument.Parse(exchange.RequestBody);
+        var requestRoot = requestDocument.RootElement;
+        var parameters = requestRoot.GetProperty("params");
+        Assert.Equal("inference.generate", parameters.GetProperty("name").GetString());
+        var arguments = parameters.GetProperty("arguments");
+        Assert.Equal(target.ProviderId, arguments.GetProperty("providerId").GetString(), StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(target.Model, arguments.GetProperty("model").GetString(), StringComparer.Ordinal);
+        Assert.Equal(expectedPrompt, arguments.GetProperty("prompt").GetString(), StringComparer.Ordinal);
+
+        using var responseDocument = JsonDocument.Parse(exchange.ResponseBody);
+        var responseRoot = responseDocument.RootElement;
+        var result = responseRoot.GetProperty("result");
+        var structuredContent = result.GetProperty("structuredContent");
+        Assert.Equal(target.ProviderId, structuredContent.GetProperty("providerId").GetString(), StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(target.Model, structuredContent.GetProperty("model").GetString(), StringComparer.Ordinal);
+        Assert.False(string.IsNullOrWhiteSpace(structuredContent.GetProperty("content").GetString()));
+    }
+
+    private static void AssertMcpRequestHeaders(CapturedHttpExchange exchange, string expectedMethod, string? expectedProtocolVersion)
+    {
+        Assert.Equal(expectedMethod, exchange.GetRequestHeader("Mcp-Method"), StringComparer.OrdinalIgnoreCase);
+        if (expectedProtocolVersion is null)
+        {
+            Assert.Null(exchange.GetRequestHeader("MCP-Protocol-Version"));
+        }
+        else
+        {
+            Assert.Equal(expectedProtocolVersion, exchange.GetRequestHeader("MCP-Protocol-Version"), StringComparer.Ordinal);
+        }
+    }
+
+    private static void AssertMcpSessionHeader(CapturedHttpExchange exchange)
+    {
+        Assert.False(string.IsNullOrWhiteSpace(exchange.GetRequestHeader("MCP-Session-Id")));
+    }
+
+    private static bool TryGetToolsArray(string responseBody, out JsonElement tools)
+    {
+        tools = default;
+
+        using var responseDocument = JsonDocument.Parse(responseBody);
+        var responseRoot = responseDocument.RootElement;
+        if (!responseRoot.TryGetProperty("result"u8, out var result))
+        {
+            return false;
+        }
+
+        if (!result.TryGetProperty("tools"u8, out tools) || tools.ValueKind != JsonValueKind.Array)
+        {
+            tools = default;
+            return false;
+        }
+
+        tools = tools.Clone();
+        return true;
+    }
+
+    private static CapturedHttpExchange FindSingleToolCallExchange(IReadOnlyList<CapturedHttpExchange> exchanges, string toolName)
+    {
+        return Assert.Single(exchanges, exchange =>
+        {
+            if (!string.Equals(exchange.Method, HttpMethod.Post.Method, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (!string.Equals(exchange.GetRequestHeader("Mcp-Method"), McpMethods.ToolsCall, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            using var requestDocument = JsonDocument.Parse(exchange.RequestBody);
+            var requestRoot = requestDocument.RootElement;
+            var parameters = requestRoot.GetProperty("params");
+            return string.Equals(parameters.GetProperty("name").GetString(), toolName, StringComparison.Ordinal);
+        });
+    }
+
+    private static string GetToolCallName(CapturedHttpExchange exchange)
+    {
+        using var requestDocument = JsonDocument.Parse(exchange.RequestBody);
+        var requestRoot = requestDocument.RootElement;
+        var parameters = requestRoot.GetProperty("params");
+        return parameters.GetProperty("name").GetString() ?? string.Empty;
+    }
+
+    private static void AssertProviderProbeResult(
+        string stdout,
+        string providerId,
+        string expectedStatus,
+        string expectedEndpoint,
+        int expectedHttpStatusCode)
+    {
+        Assert.True(TryGetStructuredContent(stdout, out var structuredContent), "Expected structured content in the console output.");
+        Assert.True(structuredContent.TryGetProperty("providers", out var providers) && providers.ValueKind == JsonValueKind.Array, "Expected a providers array in the structured content.");
+
+        foreach (var provider in providers.EnumerateArray())
+        {
+            if (!TryGetString(provider, out var currentProviderId, "providerId") ||
+                !string.Equals(currentProviderId, providerId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            Assert.Equal(expectedStatus, provider.GetProperty("status").GetString(), StringComparer.OrdinalIgnoreCase);
+
+            var probe = provider.GetProperty("probe");
+            Assert.Equal(expectedStatus, probe.GetProperty("status").GetString(), StringComparer.OrdinalIgnoreCase);
+            Assert.Equal(expectedHttpStatusCode, probe.GetProperty("httpStatusCode").GetInt32());
+            Assert.Equal(expectedEndpoint, probe.GetProperty("endpoint").GetString(), StringComparer.Ordinal);
+            return;
+        }
+
+        Assert.Fail($"Provider '{providerId}' was not present in the probe output.");
+    }
+
+    private static void AssertInferenceResponseMetadata(string stdout, string providerId, string model)
+    {
+        Assert.True(TryGetStructuredContent(stdout, out var structuredContent), "Expected structured content in the console output.");
+        Assert.Equal(providerId, structuredContent.GetProperty("providerId").GetString(), StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(model, structuredContent.GetProperty("model").GetString(), StringComparer.Ordinal);
+        Assert.False(string.IsNullOrWhiteSpace(structuredContent.GetProperty("content").GetString()));
+    }
+
+    private sealed record LiveProviderTarget(string ProviderId, Uri UpstreamBaseUri, string Model);
+
+    private sealed record LiveInferenceTarget(string ProviderId, string Model);
+
+    private sealed record InferenceModelCandidate(string ModelId, int DiscoveryOrder, double? SizeInBillions);
+
+    private sealed class LiveInferenceUnavailableException : Exception
+    {
+        public LiveInferenceUnavailableException(string message)
+            : base(message)
+        {
+        }
+    }
+
+    private sealed class LiveLmStudioUnavailableException : Exception
+    {
+        public LiveLmStudioUnavailableException(string message)
+            : base(message)
+        {
+        }
+
+        public LiveLmStudioUnavailableException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
     }
 
     private static bool TryGetString(JsonElement root, out string? value, params string[] propertyPath)

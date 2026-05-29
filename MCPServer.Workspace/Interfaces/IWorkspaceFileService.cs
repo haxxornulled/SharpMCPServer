@@ -11,5 +11,5 @@ public interface IWorkspaceFileService
 
     ValueTask<Fin<WorkspaceFileWriteResult>> WriteFileAsync(string rootName, string relativePath, string content, CancellationToken cancellationToken);
 
-    ValueTask<Fin<WorkspacePatchResult>> ApplyPatchAsync(string rootName, string relativePath, string patch, CancellationToken cancellationToken);
+    ValueTask<Fin<WorkspacePatchResult>> ApplyPatchAsync(string rootName, string relativePath, string patch, string message, CancellationToken cancellationToken);
 }

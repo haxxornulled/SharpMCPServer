@@ -205,9 +205,14 @@ public sealed class DefaultWorkspaceFileService : IWorkspaceFileService
         });
     }
 
-    public async ValueTask<Fin<WorkspacePatchResult>> ApplyPatchAsync(string rootName, string relativePath, string patch, CancellationToken cancellationToken)
+    public async ValueTask<Fin<WorkspacePatchResult>> ApplyPatchAsync(string rootName, string relativePath, string patch, string message, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return Fin.Fail<WorkspacePatchResult>(Error.New("Workspace patch message is required."));
+        }
 
         var rootResult = ResolveWritableRoot(rootName);
         if (rootResult.IsFail)
@@ -252,7 +257,8 @@ public sealed class DefaultWorkspaceFileService : IWorkspaceFileService
             AppliedHunks = patched.AppliedHunks,
             AddedLines = patched.AddedLines,
             RemovedLines = patched.RemovedLines,
-            BytesWritten = Encoding.UTF8.GetByteCount(patched.Content)
+            BytesWritten = Encoding.UTF8.GetByteCount(patched.Content),
+            Message = message.Trim()
         });
     }
 

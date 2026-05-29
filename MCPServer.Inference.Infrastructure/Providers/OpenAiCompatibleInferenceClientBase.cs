@@ -1,4 +1,6 @@
 using System.Buffers;
+using System.Diagnostics;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using LanguageExt;
@@ -17,6 +19,57 @@ public abstract class OpenAiCompatibleInferenceClientBase : ConfiguredInferenceC
         ILogger logger)
         : base(httpClientFactory, options, logger)
     {
+    }
+
+    public override async ValueTask<Fin<InferenceResponse>> GenerateAsync(
+        InferenceRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!TryGetProviderOptions(out var providerOptions))
+            {
+                return Fin.Fail<InferenceResponse>(Error.New($"Inference provider '{ProviderId}' is not configured."));
+            }
+
+            if (!providerOptions.Enabled)
+            {
+                return Fin.Fail<InferenceResponse>(Error.New($"Inference provider '{ProviderId}' is disabled."));
+            }
+
+            var primaryResult = await GenerateOnceAsync(request, providerOptions, cancellationToken).ConfigureAwait(false);
+            if (primaryResult.IsSucc || !ShouldTryModelDiscovery(request, primaryResult))
+            {
+                return primaryResult;
+            }
+
+            var discoveredModel = await TryResolveFallbackModelAsync(providerOptions, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(discoveredModel) ||
+                string.Equals(discoveredModel, providerOptions.Model, StringComparison.OrdinalIgnoreCase))
+            {
+                return primaryResult;
+            }
+
+            Logger.LogWarning(
+                "Inference provider {ProviderId} rejected configured model {ConfiguredModel}; retrying with discovered model {DiscoveredModel}.",
+                ProviderId,
+                providerOptions.Model,
+                discoveredModel);
+
+            var retryRequest = request with { Model = discoveredModel };
+            return await GenerateOnceAsync(retryRequest, providerOptions, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return Fin.Fail<InferenceResponse>(Error.New($"Inference provider '{ProviderId}' failed: {ex.Message}"));
+        }
     }
 
     protected override Fin<InferenceResponse> ParseResponse(string payload, McpInferenceProviderOptions providerOptions)
@@ -56,8 +109,12 @@ public abstract class OpenAiCompatibleInferenceClientBase : ConfiguredInferenceC
         var buffer = new ArrayBufferWriter<byte>();
         using (var writer = new Utf8JsonWriter(buffer))
         {
+            var model = string.IsNullOrWhiteSpace(request.Model)
+                ? providerOptions.Model
+                : request.Model.Trim();
+
             writer.WriteStartObject();
-            writer.WriteString("model", request.Model ?? providerOptions.Model);
+            writer.WriteString("model", model);
             writer.WritePropertyName("messages");
             writer.WriteStartArray();
 
@@ -76,15 +133,31 @@ public abstract class OpenAiCompatibleInferenceClientBase : ConfiguredInferenceC
 
             writer.WriteEndArray();
 
-            if (request.MaxTokens is int maxTokens && maxTokens > 0)
+            var effectiveMaxTokens = request.MaxTokens is int requestMaxTokens && requestMaxTokens > 0
+                ? requestMaxTokens
+                : providerOptions.MaxTokens;
+            if (effectiveMaxTokens is int maxTokens && maxTokens > 0)
             {
                 writer.WriteNumber("max_tokens", maxTokens);
             }
 
-            if (request.Temperature is double temperature)
+            var effectiveTemperature = request.Temperature ?? providerOptions.Temperature;
+            if (effectiveTemperature is double temperature)
             {
                 writer.WriteNumber("temperature", temperature);
             }
+
+            if (providerOptions.TopP is double topP)
+            {
+                writer.WriteNumber("top_p", topP);
+            }
+
+            if (providerOptions.Seed is int seed)
+            {
+                writer.WriteNumber("seed", seed);
+            }
+
+            WriteAdditionalRequestFields(writer, request, providerOptions);
 
             writer.WriteBoolean("stream", false);
             writer.WriteEndObject();
@@ -94,6 +167,102 @@ public abstract class OpenAiCompatibleInferenceClientBase : ConfiguredInferenceC
     }
 
     protected override string GetRequestPath() => "chat/completions";
+
+    protected virtual void WriteAdditionalRequestFields(
+        Utf8JsonWriter writer,
+        InferenceRequest request,
+        McpInferenceProviderOptions providerOptions)
+    {
+    }
+
+    private async ValueTask<Fin<InferenceResponse>> GenerateOnceAsync(
+        InferenceRequest request,
+        McpInferenceProviderOptions providerOptions,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = BuildRequestUri(providerOptions.BaseAddress, GetRequestPath());
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri);
+        var startedAt = Stopwatch.GetTimestamp();
+
+        ConfigureRequest(httpRequest, providerOptions);
+        httpRequest.Content = new StringContent(BuildRequestJson(request, providerOptions), Encoding.UTF8, "application/json");
+
+        var httpClient = HttpClientFactory.CreateClient(GetHttpClientName(providerOptions));
+        using var response = await httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            return Fin.Fail<InferenceResponse>(Error.New(BuildHttpFailureMessage(response.StatusCode, payload)));
+        }
+
+        var parseResult = ParseResponse(payload, providerOptions);
+        return parseResult.Match<Fin<InferenceResponse>>(
+            Succ: value => Fin.Succ(AttachPerformanceMetadata(value, Stopwatch.GetElapsedTime(startedAt))),
+            Fail: static error => Fin.Fail<InferenceResponse>(error));
+    }
+
+    private async ValueTask<string?> TryResolveFallbackModelAsync(
+        McpInferenceProviderOptions providerOptions,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = BuildRequestUri(providerOptions.BaseAddress, GetProbePath());
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, requestUri);
+
+        ConfigureRequest(httpRequest, providerOptions);
+
+        var httpClient = HttpClientFactory.CreateClient(GetHttpClientName(providerOptions));
+        using var response = await httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            var root = document.RootElement;
+            if (TryReadModelIdentifier(root, out var modelId))
+            {
+                return modelId;
+            }
+        }
+        catch
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    private static bool ShouldTryModelDiscovery(
+        InferenceRequest request,
+        Fin<InferenceResponse> result)
+    {
+        if (!string.IsNullOrWhiteSpace(request.Model))
+        {
+            return false;
+        }
+
+        return result.Match(
+            Succ: static _ => false,
+            Fail: static error => IsMissingModelFailure(error.Message));
+    }
+
+    private static bool IsMissingModelFailure(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return message.Contains("model", StringComparison.OrdinalIgnoreCase) &&
+            (message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
+             message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
+             message.Contains("unknown model", StringComparison.OrdinalIgnoreCase) ||
+             message.Contains("no such model", StringComparison.OrdinalIgnoreCase));
+    }
 
     protected virtual string ExtractContent(JsonElement root)
     {
@@ -216,6 +385,56 @@ public abstract class OpenAiCompatibleInferenceClientBase : ConfiguredInferenceC
         }
 
         return string.Empty;
+    }
+
+    protected static bool TryReadModelIdentifier(
+        JsonElement root,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? modelId)
+    {
+        modelId = null;
+
+        foreach (var listPropertyName in new[] { "data", "models" })
+        {
+            if (!root.TryGetProperty(listPropertyName, out var listElement) || listElement.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var item in listElement.EnumerateArray())
+            {
+                var candidate = ReadOptionalString(item, "id", "key", "model", "name");
+                if (!string.IsNullOrWhiteSpace(candidate))
+                {
+                    modelId = candidate.Trim();
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    protected static long? ReadOptionalInt64(JsonElement element, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (!element.TryGetProperty(propertyName, out var property))
+            {
+                continue;
+            }
+
+            if (property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var longValue))
+            {
+                return longValue;
+            }
+
+            if (property.ValueKind == JsonValueKind.String && long.TryParse(property.GetString(), out longValue))
+            {
+                return longValue;
+            }
+        }
+
+        return null;
     }
 
     protected static string ToProviderRole(InferenceRole role)
